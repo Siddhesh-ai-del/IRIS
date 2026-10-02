@@ -2,10 +2,10 @@
 
 **A cache-aware, replayable, redacting, local-first AI coding agent for your terminal — in a single Rust binary.**
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-pre--release-E8590C.svg)](#project-status)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg)](#roadmap)
-[![Language](https://img.shields.io/badge/language-Rust-000000.svg?logo=rust&logoColor=white)](#architecture)
+[![License](https://img.shields.io/badge/License-Apache--2.0-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=apache&logoColor=white)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Pre--release-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rocket&logoColor=white)](#project-status)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=gnometerminal&logoColor=white)](#roadmap)
+[![Language](https://img.shields.io/badge/Language-Rust-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rust&logoColor=white)](#architecture)
 
 ---
 
