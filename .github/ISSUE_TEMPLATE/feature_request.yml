@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose an improvement or new capability for IRIS.
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the **problem** first, then the solution. IRIS is built around three
+        principles: cache-first economics, local-first privacy, and replayable/open
+        session formats — proposals aligned with them fare best.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What are you trying to do, and why is it painful today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should IRIS do about it?
+    validations:
+      required: true
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art
+      description: How do existing tools handle this? Links to upstream issues welcome.
+  - type: dropdown
+    id: fit
+    attributes:
+      label: Which IRIS principle does this advance?
+      options:
+        - Cache-first (cost/latency visibility, stable prompts)
+        - Local-first privacy (redaction, telemetry-off, data ownership)
+        - Replayable / open formats (durable sessions, no lock-in)
+        - General parity (feature parity with established agents)
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true

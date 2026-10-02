@@ -1,0 +1,27 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+# Cargo.lock is committed once the binary crate lands (application, not library)
+
+# Coverage / test artifacts
+/coverage/
+lcov.info
+*.profraw
+*.profdata
+nextest-*.xml
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+.directory
+
+# Local environment — never commit credentials
+.env
+.env.*
+*.pem
+*.key

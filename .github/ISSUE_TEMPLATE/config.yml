@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/Siddhesh-ai-del/IRIS/discussions
+    about: Ask questions and discuss ideas about IRIS here.
+  - name: Security vulnerability
+    url: https://github.com/Siddhesh-ai-del/IRIS/security/advisories/new
+    about: Report security issues privately — never in a public issue.
