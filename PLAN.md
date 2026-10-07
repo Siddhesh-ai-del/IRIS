@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 0.2 (CLI + config skeleton)
-- **Current phase:** 0 — Toolchain & Skeleton
-- **Completed stages:** 0.1 ✅ (2026-10-07)
+- **Next action:** Stage 1.1 (Domain types — Message, ContentBlock, serde round-trip + insta snapshot)
+- **Current phase:** 1 — Headless Core Loop
+- **Completed stages:** 0.1 ✅, 0.2 ✅ (2026-10-07)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -62,6 +62,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   `~/.cargo/bin`. PATH needs `~/.cargo/bin` sourced per shell (`. "$HOME/.cargo/env"`).
 - `agent/` is now a git repo (root commit `ff4831d`); `IRIS/` is a separate repo.
 - Stage 0.1 gate: `just test` green (1 passed), `cargo clippy --all-targets -- -D warnings` clean.
+- Stage 0.2 gate: `just test` green (26 passed — 21 config precedence + 5 doctor CLI),
+  clippy clean, `ferro doctor` smoke verified (no key leak). `cargo llvm-cov` deferred:
+  needs `llvm-tools` component (slow download) — required by stage 7.2, not 0.2.
 
 ---
 
@@ -81,7 +84,13 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   - **Done when:** `just test` runs an empty suite green; `cargo clippy -- -D warnings` clean.
   - Risk: Low (env setup) · Network-dependent.
 
-- [ ] **0.2 CLI + config skeleton** (1h)
+- [x] **0.2 CLI + config skeleton** (1h) — done 2026-10-07
+  - Deviation: layering hand-rolled in `ferro-core::config` (defaults → file →
+    `$FERRO_*` env → flags) instead of `config-rs`, because config-rs's env source
+    reads process env directly (unsafe/racy to mutate under edition 2024 tests) and
+    can't be tested hermetically. Same precedence, injected env-map inputs.
+  - Extra: `FERRO_CONFIG` env override for config path; `--base-url` global flag;
+    `doctor` warns if config file contains `api_key` (never reads it).
   - `crates/cli/src/main.rs` with `clap 4` subcommands `run`, `chat`, `sessions`, `doctor`;
     `config-rs` layering (defaults → `~/.config/ferro/config.toml` → `$FERRO_*` env → flags);
     provider base URL config (default `https://openrouter.ai/api/v1`);

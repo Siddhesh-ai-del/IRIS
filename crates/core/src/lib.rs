@@ -4,6 +4,8 @@
 /// Library version, mirroring the workspace package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod config;
+
 #[cfg(test)]
 mod tests {
     use super::VERSION;
