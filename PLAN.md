@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 0.1 (blocked on toolchain install — see Environment notes)
+- **Next action:** Stage 0.2 (CLI + config skeleton)
 - **Current phase:** 0 — Toolchain & Skeleton
-- **Completed stages:** none yet
+- **Completed stages:** 0.1 ✅ (2026-10-07)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -53,6 +53,16 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   smoke tests go through OpenRouter; CI uses httpmock cassettes regardless.
   User must supply `OPENROUTER_API_KEY` at runtime (never committed, never in config).
 
+#### Update (2026-10-07)
+
+- Network recovered: ~3.2 MB/s general, GitHub ~400 KB/s, static.rust-lang.org ~97 KB/s
+  (5–10× faster than research day). Toolchain install completed in background.
+- **Rust 1.99.0 installed** (rustup, minimal + clippy/rustfmt), pinned in `rust-toolchain.toml`.
+  `just` 1.58.0, `cargo-nextest` 0.9.146, `cargo-llvm-cov` 0.9.1 — all prebuilt binaries in
+  `~/.cargo/bin`. PATH needs `~/.cargo/bin` sourced per shell (`. "$HOME/.cargo/env"`).
+- `agent/` is now a git repo (root commit `ff4831d`); `IRIS/` is a separate repo.
+- Stage 0.1 gate: `just test` green (1 passed), `cargo clippy --all-targets -- -D warnings` clean.
+
 ---
 
 ## Phases
@@ -62,7 +72,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 0 — Toolchain & Skeleton (2 stages, ~2h)
 
-- [ ] **0.1 Install toolchain + scaffold workspace** (1h)
+- [x] **0.1 Install toolchain + scaffold workspace** (1h) — done 2026-10-07
   - Install `rustup` (stable, minimal profile), `cargo-nextest`, `cargo-llvm-cov`, `just`
     (binary installers preferred over `cargo install` given slow network; `pacman` needs the user).
     Create workspace at `agent/` with `crates/core` (`ferro-core`) and `crates/cli` (`ferro` binary);
