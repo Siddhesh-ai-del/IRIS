@@ -1,0 +1,16 @@
+[package]
+name = "ferro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal-based AI coding agent"
+
+[[bin]]
+name = "ferro"
+path = "src/main.rs"
+
+[dependencies]
+ferro-core = { path = "../core" }
+
+[lints]
+workspace = true
