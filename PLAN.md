@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.3 (SSE streaming)
+- **Next action:** Stage 1.5 (Tool registry + JSON schemas; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅ (2026-10-07/08)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -73,6 +73,15 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   `async fn` in impl but RPITIT `+ Send` in trait definition (loop will run in a
   spawned task); empty tool `arguments` string → `{}`; missing `finish_reason`
   inferred (tool calls → tool_use), unknown value fails loud.
+- Stage 1.3 gate: 85 tests green (25 new: 10 SSE decoder, 13 stream/parser/
+  assembler/property/cancellation, 2 httpmock streaming), fmt + clippy clean.
+  Deps added: `futures`, `bytes`, tokio `signal`, `libc` (dev), reqwest `stream`.
+  Notes: nextest 0.9.146 defaults to **fail-fast** — RED evidence needs
+  `cargo nextest run --no-fail-fast`; reqwest 0.13 has no `reqwest::Bytes`
+  re-export and `connect_timeout` only on `ClientBuilder` (moved there, applies
+  to both paths); streaming has no total deadline by design. EOF without
+  `[DONE]` tolerated (synthesized Done, stop reason inferred); tool call missing
+  id → `call_{index}` placeholder, missing name → Decode error.
 
 ---
 
@@ -126,10 +135,17 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     60 tests green, fmt + clippy clean.
   Risk: Low · Depends: 1.1
 
-- [ ] **1.3 SSE streaming** (1h) — reqwest byte-stream → `futures::Stream<Item = Result<Event>>`;
-  events: `delta_text`, `delta_tool_call`, `usage`, `done`; cancellation via `tokio::select!` + Ctrl-C.
-  **Done when:** streamed output reassembles to identical content vs non-streaming (property test).
-  Risk: **Medium** (partial tool-call deltas across chunks) · Depends: 1.2
+- [x] **1.3 SSE streaming** (1h) — done 2026-10-08
+  - `sse.rs` incremental byte-level decoder (LF/CRLF, split lines, split UTF-8
+    chars, comments, `data` quirk); `stream.rs` chunk DTOs + `StreamParser`
+    (index-keyed tool fragments, args accumulated mid-JSON, finish/usage/
+    `[DONE]`), `event_stream` unfold, `StreamAssembler` (events → domain);
+    `Provider::complete_stream` + `collect_stream`; cancellation via
+    `tokio::select!` (partial progress preserved) + real in-process SIGINT test.
+  - **Done when:** property test over chunk sizes [len,64,13,7,5,2,1] —
+    streamed reassembly byte-identical to non-streaming. 85 tests green, fmt +
+    clippy clean.
+  Risk: Medium · Depends: 1.2
 
 - [ ] **1.4 Anthropic native client** (1h) — **DEFERRED under D4/D6 (OpenRouter-only):**
   second trait impl against `/v1/messages` with `cache_control` ephemeral blocks and Anthropic's

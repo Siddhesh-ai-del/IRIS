@@ -29,6 +29,17 @@ pub struct WireRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Omitted for non-streaming; `Some(true)` on the streaming path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    /// Only meaningful with `stream`; asks for the trailing usage chunk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<StreamOptions>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StreamOptions {
+    pub include_usage: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -98,6 +109,16 @@ pub struct WireToolSpec {
 
 /// Domain request → OpenAI wire request (flattens tool-role messages).
 pub fn request_to_wire(request: CompletionRequest) -> WireRequest {
+    build_wire_request(request, false)
+}
+
+/// Same as [`request_to_wire`], but flagged for SSE streaming with a
+/// trailing usage chunk (`stream_options.include_usage`).
+pub fn request_to_streaming_wire(request: CompletionRequest) -> WireRequest {
+    build_wire_request(request, true)
+}
+
+fn build_wire_request(request: CompletionRequest, stream: bool) -> WireRequest {
     let mut messages = Vec::new();
     for message in &request.messages {
         match message.role {
@@ -180,6 +201,10 @@ pub fn request_to_wire(request: CompletionRequest) -> WireRequest {
             .collect(),
         max_tokens: request.max_tokens,
         temperature: request.temperature,
+        stream: stream.then_some(true),
+        stream_options: stream.then_some(StreamOptions {
+            include_usage: true,
+        }),
     }
 }
 
@@ -301,27 +326,8 @@ pub fn response_to_domain(response: WireResponse) -> Result<CompletionResponse, 
         }
     }
 
-    let stop_reason = match choice.finish_reason.as_deref() {
-        Some("stop") => StopReason::EndTurn,
-        Some("length") => StopReason::MaxTokens,
-        Some("tool_calls") => StopReason::ToolUse,
-        Some("content_filter") => StopReason::ContentFilter,
-        Some("stop_sequence") => StopReason::StopSequence,
-        Some(other) => return Err(ProviderError::UnknownFinishReason(other.to_string())),
-        // Some compatible providers omit finish_reason — infer from the
-        // message shape rather than guess from nothing.
-        None if has_tool_calls => StopReason::ToolUse,
-        None => StopReason::EndTurn,
-    };
-
-    let usage = match response.usage {
-        Some(wire) => Usage {
-            input_tokens: wire.prompt_tokens,
-            output_tokens: wire.completion_tokens,
-            total_tokens: wire.total_tokens,
-        },
-        None => Usage::default(),
-    };
+    let stop_reason = map_finish_reason(choice.finish_reason.as_deref(), has_tool_calls)?;
+    let usage = usage_from_wire(response.usage);
 
     Ok(CompletionResponse {
         message: Message {
@@ -331,6 +337,37 @@ pub fn response_to_domain(response: WireResponse) -> Result<CompletionResponse, 
         stop_reason,
         usage,
     })
+}
+
+/// `finish_reason` → [`StopReason`] (shared by both streaming and
+/// non-streaming paths). Unknown values fail loud; missing values infer
+/// from the message shape.
+pub(crate) fn map_finish_reason(
+    finish_reason: Option<&str>,
+    has_tool_calls: bool,
+) -> Result<StopReason, ProviderError> {
+    match finish_reason {
+        Some("stop") => Ok(StopReason::EndTurn),
+        Some("length") => Ok(StopReason::MaxTokens),
+        Some("tool_calls") => Ok(StopReason::ToolUse),
+        Some("content_filter") => Ok(StopReason::ContentFilter),
+        Some("stop_sequence") => Ok(StopReason::StopSequence),
+        Some(other) => Err(ProviderError::UnknownFinishReason(other.to_string())),
+        None if has_tool_calls => Ok(StopReason::ToolUse),
+        None => Ok(StopReason::EndTurn),
+    }
+}
+
+/// Wire usage accounting → domain (missing → zero, both paths).
+pub(crate) fn usage_from_wire(usage: Option<WireUsage>) -> Usage {
+    match usage {
+        Some(wire) => Usage {
+            input_tokens: wire.prompt_tokens,
+            output_tokens: wire.completion_tokens,
+            total_tokens: wire.total_tokens,
+        },
+        None => Usage::default(),
+    }
 }
 
 #[cfg(test)]
