@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.1 (Domain types — Message, ContentBlock, serde round-trip + insta snapshot)
+- **Next action:** Stage 1.2 (Provider trait + OpenRouter non-streaming client)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅ (2026-10-07)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅ (2026-10-07/08)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -65,6 +65,8 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 - Stage 0.2 gate: `just test` green (26 passed — 21 config precedence + 5 doctor CLI),
   clippy clean, `ferro doctor` smoke verified (no key leak). `cargo llvm-cov` deferred:
   needs `llvm-tools` component (slow download) — required by stage 7.2, not 0.2.
+- Stage 1.1 gate: 38 tests green (17 types: round-trips, wire-shape, insta snapshot),
+  clippy clean. insta needs `features = ["json"]` for `assert_json_snapshot!`.
 
 ---
 
@@ -101,9 +103,11 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 1 — Headless Core Loop (10 stages, ~10h) — the agent before it has a face
 
-- [ ] **1.1 Domain types** (1h) — `crates/core/src/types.rs`: `Message`, `ContentBlock`
-  (text | image | tool_use | tool_result), `ToolCall`, `ToolResult`, `Usage`, `StopReason`;
-  serde round-trip tests + `insta` snapshot of serialized JSON.
+- [x] **1.1 Domain types** (1h) — done 2026-10-08 — `crates/core/src/types.rs`:
+  `Role`, `Message`, `ContentBlock` (text | image | tool_use | tool_result, tagged
+  `type` field), `ToolCall`, `ToolResult`, `Usage`, `StopReason`;
+  serde round-trip tests + wire-shape assertions + `insta` JSON snapshot
+  (`snapshot_full_conversation_json`). 38 tests green.
   Risk: Low · Depends: 0.1
 
 - [ ] **1.2 Provider trait + OpenRouter (OpenAI-compatible) non-streaming** (1h) —
