@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.2 (Provider trait + OpenRouter non-streaming client)
+- **Next action:** Stage 1.3 (SSE streaming)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅ (2026-10-07/08)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅ (2026-10-07/08)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -67,6 +67,12 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   needs `llvm-tools` component (slow download) — required by stage 7.2, not 0.2.
 - Stage 1.1 gate: 38 tests green (17 types: round-trips, wire-shape, insta snapshot),
   clippy clean. insta needs `features = ["json"]` for `assert_json_snapshot!`.
+- Stage 1.2 gate: 60 tests green (22 new: 14 wire translation + 8 httpmock client),
+  fmt + clippy `-D warnings` clean. Deps added: `reqwest 0.13` (rustls, no openssl),
+  `tokio`, `httpmock 0.8` (dev). Deviations: `trait Provider::complete` uses
+  `async fn` in impl but RPITIT `+ Send` in trait definition (loop will run in a
+  spawned task); empty tool `arguments` string → `{}`; missing `finish_reason`
+  inferred (tool calls → tool_use), unknown value fails loud.
 
 ---
 
@@ -110,10 +116,14 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   (`snapshot_full_conversation_json`). 38 tests green.
   Risk: Low · Depends: 0.1
 
-- [ ] **1.2 Provider trait + OpenRouter (OpenAI-compatible) non-streaming** (1h) —
-  `crates/core/src/provider/mod.rs`: `trait Provider { async fn complete(...) }`;
-  `openai.rs` via `reqwest` with **configurable base URL** (OpenRouter default), auth header from
-  `OPENROUTER_API_KEY`; `httpmock` fake `/api/v1/chat/completions`.
+- [x] **1.2 Provider trait + OpenRouter (OpenAI-compatible) non-streaming** (1h) — done 2026-10-08
+  - `crates/core/src/provider/mod.rs`: `trait Provider` (RPITIT `+ Send` `complete(...)`),
+    `ToolSpec`, `CompletionRequest`/`CompletionResponse`, typed `ProviderError`;
+    `wire.rs` domain⇄OpenAI translation (tool-role messages flatten per `tool_call_id`,
+    `arguments` as JSON string, image → data-URL part, `finish_reason` mapping);
+    `openai.rs` via `reqwest` with **configurable base URL** (OpenRouter default), bearer auth from
+    `OPENROUTER_API_KEY` (passed in by caller, D6); `httpmock` fake `/chat/completions`.
+    60 tests green, fmt + clippy clean.
   Risk: Low · Depends: 1.1
 
 - [ ] **1.3 SSE streaming** (1h) — reqwest byte-stream → `futures::Stream<Item = Result<Event>>`;
