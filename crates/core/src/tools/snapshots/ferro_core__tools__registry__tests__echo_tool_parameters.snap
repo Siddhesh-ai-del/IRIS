@@ -1,0 +1,23 @@
+---
+source: crates/core/src/tools/registry.rs
+expression: echo.parameters
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "shout": {
+      "default": false,
+      "description": "Uppercase the echo.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "Text to echo back.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "EchoArgs",
+  "type": "object"
+}

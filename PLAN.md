@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.5 (Tool registry + JSON schemas; 1.4 deferred under D4)
+- **Next action:** Stage 1.6 (Read/Write/List tools — path confinement; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09; 1.4 skipped)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -82,6 +82,13 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   to both paths); streaming has no total deadline by design. EOF without
   `[DONE]` tolerated (synthesized Done, stop reason inferred); tool call missing
   id → `call_{index}` placeholder, missing name → Decode error.
+- Stage 1.5 gate: 92 tests green (7 new: dispatch/id-stamp, boundary-validation
+  before dispatch, unknown tool, validate-without-dispatch, schemars schema +
+  insta snapshot, no-arg `{}`, upsert), fmt + clippy clean. Deps added:
+  `schemars 1.2` (derive). Design notes: `Tool::execute` is `impl Future + Send`
+  (async-ready for the 1.7 shell tool); registry is closure-based (no
+  `dyn Tool` — the associated `Args` type keeps the trait non-object-safe);
+  registry stamps `tool_use_id` (tools may leave it empty).
 
 ---
 
@@ -154,9 +161,18 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   without rework); OpenRouter serves Anthropic models via stage 1.2's client.
   Risk: Medium · Depends: 1.3 · **Status: deferred**
 
-- [ ] **1.5 Tool registry + JSON schemas** (1h) — `crates/core/src/tools/registry.rs`:
-  `trait Tool { name; schema(); execute(ctx, args) -> Result<ToolResult> }`; schema via `schemars`;
-  registry validates args at the boundary before dispatch. Risk: Low · Depends: 1.1
+- [x] **1.5 Tool registry + JSON schemas** (1h) — done 2026-10-09
+  - `crates/core/src/tools/registry.rs`: `trait Tool` (`type Args: Deserialize +
+    JsonSchema`; `name`/`description`/`schema`/`spec`/`parse`/`execute(ctx, args)`
+    with `impl Future + Send`, mirroring `Provider`), `ToolContext`
+    (workspace_root), `ToolError` (UnknownTool/InvalidArgs/Failed),
+    `ToolRegistry` (register upsert, specs, contains, validate, async execute).
+  - One `Args` type is the single source of truth: `schemars::schema_for!` feeds
+    the model; `serde_json::from_value` validates **at the registry boundary**
+    before the tool body runs (proven by a fixture tool whose body-flag never
+    flips on invalid args); registry stamps `tool_use_id` onto the result.
+  - 92 tests green (7 new incl. insta schema snapshot), fmt + clippy clean.
+  Risk: Low · Depends: 1.1
 
 - [ ] **1.6 Read/Write/List tools** (1h) — path confinement to workspace root (reject `..`/symlink
   escapes), size caps, UTF-8 lossy handling; `proptest` for path traversal.
