@@ -24,4 +24,5 @@ workspace = true
 httpmock = "0.8.3"
 insta = { version = "1.49.0", features = ["json"] }
 libc = "0.2.190"
+proptest = "1.11.0"
 tempfile = "3.27.0"

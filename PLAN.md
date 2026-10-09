@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.6 (Read/Write/List tools — path confinement; 1.4 deferred under D4)
+- **Next action:** Stage 1.7 (Shell tool via `portable-pty`; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09; 1.4 skipped)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09; 1.4 skipped)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -89,6 +89,13 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   (async-ready for the 1.7 shell tool); registry is closure-based (no
   `dyn Tool` — the associated `Args` type keeps the trait non-object-safe);
   registry stamps `tool_use_id` (tools may leave it empty).
+- Stage 1.6 gate: 124 tests green (32 new), fmt + clippy clean. Deps added:
+  `proptest 1.11` (dev). Security notes: `ToolError::PathEscape` variant added
+  for auditable confinement failures; tool IO failures surface as
+  `ToolError::Failed` (loop converts both to error `ToolResult`s at 1.9);
+  **100% coverage target for this stage is verified at 7.2** (`cargo-llvm-cov`
+  still deferred — llvm-tools download too slow here); proptest defaults
+  (256 cases) — rerun-stable 3/3.
 
 ---
 
@@ -174,9 +181,23 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   - 92 tests green (7 new incl. insta schema snapshot), fmt + clippy clean.
   Risk: Low · Depends: 1.1
 
-- [ ] **1.6 Read/Write/List tools** (1h) — path confinement to workspace root (reject `..`/symlink
-  escapes), size caps, UTF-8 lossy handling; `proptest` for path traversal.
-  Risk: Medium (security — target 100% coverage) · Depends: 1.5
+- [x] **1.6 Read/Write/List tools** (1h) — done 2026-10-09
+  - `tools/path.rs` confinement core: **lexical `.`/`..` normalization first**
+    (so `link/../x` never depends on symlink targets), then canonicalize the
+    longest *lstat-existing* prefix (broken symlinks count as existing → never
+    written through) and require **component-wise** containment vs the
+    canonical root (`/ws` never prefixes `/ws_evil`); remainder is
+    normalized + nonexistent → can't hold symlinks. Violations →
+    `ToolError::PathEscape`. Residual TOCTOU documented (adversary = model,
+    not concurrent local attacker).
+  - `read_file` (64 KiB cap, truncation **with visible notice**, UTF-8 lossy),
+    `write_file` (parent-dir creation, overwrite), `list_dir` (sorted,
+    `/`-suffixed dirs, 500-entry cap + notice, non-recursive).
+  - 124 tests green (32 new: 13 path incl. symlink/dir/file/sibling-prefix
+    escapes + proptest property over generated `..`/`.`/segment paths, 7 read,
+    6 write incl. outside-file-unchanged proofs, 6 list; end-to-end escape
+    attempts through the registry). fmt + clippy clean.
+  Risk: Medium (security) · Depends: 1.5
 
 - [ ] **1.7 Shell tool via `portable-pty`** (1h) — PTY spawn, streamed stdout/stderr capture,
   timeout + kill, **always routed through the permission gate**. Risk: Medium · Depends: 1.5

@@ -43,6 +43,11 @@ pub enum ToolError {
     #[error("invalid arguments for `{tool}`: {message}")]
     InvalidArgs { tool: String, message: String },
 
+    /// The resolved path left the workspace root — security event
+    /// (stage 1.6 confinement: `..` or symlink escape).
+    #[error("path escapes the workspace: {path}")]
+    PathEscape { path: String },
+
     /// The tool body failed (IO, spawn, patch apply, …).
     #[error("`{tool}` failed: {message}")]
     Failed { tool: String, message: String },
