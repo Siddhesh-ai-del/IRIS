@@ -7,6 +7,7 @@ description = "Headless core loop for the ferro terminal coding agent"
 
 [dependencies]
 bytes = "1.12.1"
+diffy = "0.5.2"
 futures = "0.3.34"
 libc = "0.2.190"
 portable-pty = "0.9.0"

@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.8 (`apply_patch` tool via `diffy`; 1.4 deferred under D4)
+- **Next action:** Stage 1.9 (Permission gate + the loop; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09; 1.4 skipped)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -105,6 +105,15 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   `setsid` + `TIOCSCTTY` (child = session+group leader → `killpg`
   reaches grandchildren); `CommandBuilder::new` inherits the env by
   default. `ToolContext` is now gate-carrying (manual `Debug`).
+- Stage 1.8 gate: 165 tests green (16 new), fmt + clippy clean. Deps
+  added: `diffy 0.5.2`. Notes: diffy's `Patch::from_str` borrows the
+  input (named lifetime in `target_of`); `patch.modified()/original()`
+  expose header paths (no hand-rolled header parser); diffy has NO
+  context-content fuzz — only positional offset search (plan's
+  "fuzz failure" = exhausted offset search); hunk body lines need their
+  leading space/context marker or the parser rejects them (caught in a
+  test fixture); golden files are in-module const strings (self-contained
+  unit tests, no external fixture dir).
 
 ---
 
@@ -237,10 +246,27 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     green (25 new), timing-sensitive tests rerun-stable 5/5.
   Risk: Medium · Depends: 1.5
 
-- [ ] **1.8 `apply_patch` tool with `diffy`** (1h) — model emits unified diff → `diffy::apply`
-  with fallback to whole-file write on fuzz failure (targets KQ2.4 edit-apply pain).
-  **Done when:** golden-file tests incl. intentionally malformed patch → graceful error, never
-  silent corruption. Risk: **High** · Depends: 1.6
+- [x] **1.8 `apply_patch` tool with `diffy`** (1h) — done 2026-10-09
+  - `tools/patch.rs`: model emits unified diff → `diffy 0.5.2` parse →
+    confined target (headers `+++`→`---` fallback, git `a/`/`b/` prefix
+    strip, `/dev/null` = deletion → unsupported, 1.6 `resolve_within`
+    guards escapes) → read whole file (UTF-8 required, no lossy) →
+    `diffy::apply` → write only on success.
+  - **diffy semantics (source-verified): positional offset search** around
+    the declared hunk position (stale line numbers still land — the
+    KQ2.4 painkiller, tested), but **no context-content fuzz** — a hunk
+    whose context vanished fails cleanly (`ApplyError` = "error applying
+    hunk #N").
+  - **Fallback:** optional `new_content` arg — used **only** when the
+    patch parses but fails to apply: whole-file write, reported loudly
+    ("…whole file fallback"). Malformed patch → rejected **before any
+    fs write**, `new_content` deliberately ignored (model bug ≠ apply
+    failure).
+  - Golden tests pin "never silent corruption": mismatch without
+    fallback, malformed prose patch, garbage `@@` header → file
+    **byte-identical**; path-escape header → `PathEscape` + outside file
+    untouched; non-UTF-8 target untouched. 165 tests green (16 new).
+  Risk: High · Depends: 1.6
 
 - [ ] **1.9 Permission gate + the loop** (1h) — `crates/core/src/loop.rs`: explicit `loop`
   (never recursion), `max_turns`, `max_tokens_budget`, per-tool policy (`allow`/`deny`/`ask`)
