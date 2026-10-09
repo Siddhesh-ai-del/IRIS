@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.9 (Permission gate + the loop; 1.4 deferred under D4)
+- **Next action:** Stage 1.10 (headless `run -p` mode; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -268,11 +268,37 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     untouched; non-UTF-8 target untouched. 165 tests green (16 new).
   Risk: High · Depends: 1.6
 
-- [ ] **1.9 Permission gate + the loop** (1h) — `crates/core/src/loop.rs`: explicit `loop`
-  (never recursion), `max_turns`, `max_tokens_budget`, per-tool policy (`allow`/`deny`/`ask`)
-  from config; **loop core must be TUI-free** (runs headless).
-  **Done when:** `httpmock` cassette test runs a full 3-turn tool-using conversation to completion;
-  loop file ≤250 LoC. Risk: **High** (core of the product) · Depends: 1.3, 1.6, 1.7, 1.8
+- [x] **1.9 Permission gate + the loop** (1h) — done 2026-10-09
+  - `crates/core/src/loop.rs` (exposed as `agent_loop` via `#[path]` —
+    `loop` is a keyword; file keeps the plan's name): one explicit
+    `loop`, never recursion; `max_turns` + `max_tokens_budget` +
+    per-tool `allow`/`deny`/`ask` policy from config; TUI-free (the
+    [`LoopEvent`] observer is the only seam — 1.10 stdout, 4.x TUI).
+  - Config gains `max_turns` (default 50), `max_tokens_budget`
+    (default 250 000, cumulative `total_tokens`) and the
+    `[permissions]` overlay — **file-layer only** (env/flag layers
+    carry scalars, not maps). `Decision` is now serde, so the config
+    vocabulary *is* the gate vocabulary. `Config::permission_gate()`
+    builds a `PolicyGate` (overlay ∪ built-in: `read_file`/`list_dir`
+    allow, everything else **ask** — fails safe) for the 1.7 seam.
+  - The loop resolves `ask` through `AskResolver` before dispatch
+    (`DenyOnAsk` headless default, closures for tests, TUI prompt at
+    4.5); the resolved decision becomes the gate the registry re-checks
+    at dispatch — one enforcement point, nothing forgettable. Tool
+    errors (unknown tool, invalid args, denial) become error
+    `ToolResult`s the model reacts to; only provider errors abort.
+  - Limits are checked **before** each provider call — a budget never
+    causes an overshooting call; a finishing response completes even if
+    it crossed the budget.
+  - **Done when:** `httpmock` cassette runs a full 3-turn tool
+    conversation (read → list → final text) to completion through the
+    real streaming client; each turn-mock matched on a body marker that
+    only exists once prior tool results were fed back (mocks prove
+    transcript growth). httpmock serves the first registered match →
+    layered mocks registered in reverse. Loop file **215 LoC ≤ 250**
+    (loop tests live in `tests/agent_loop.rs`). 183 tests green
+    (18 new), fmt + clippy clean, loop suite rerun-stable 3/3.
+  Risk: High · Depends: 1.3, 1.6, 1.7, 1.8
 
 - [ ] **1.10 Headless `run -p` mode** (1h) — `iris run -p "prompt" --workdir <dir>`: streams text
   to stdout, tool events to stderr, exit code = agent outcome. CI parity item + **test harness for

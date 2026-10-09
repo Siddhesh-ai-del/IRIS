@@ -9,6 +9,11 @@ pub mod provider;
 pub mod tools;
 pub mod types;
 
+// `loop` is a keyword, so the module is exposed as `agent_loop` while
+// the file keeps the plan's name (stage 1.9).
+#[path = "loop.rs"]
+pub mod agent_loop;
+
 #[cfg(test)]
 mod tests {
     use super::VERSION;

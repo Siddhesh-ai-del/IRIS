@@ -8,12 +8,19 @@
 //! never from the config file. [`Config`] has no key field by design;
 //! [`api_key_in_file`] exists so `doctor` can warn about keys mistakenly
 //! stored there.
+//!
+//! Stage 1.9 adds loop knobs (`max_turns`, `max_tokens_budget`) and the
+//! `[permissions]` per-tool policy table. Those are **file-layer only** —
+//! env and flag layers carry scalars, not maps.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::tools::permissions::{Decision, Gate, PolicyGate};
 
 /// Default OpenRouter base URL (confirmed decision D4).
 pub const DEFAULT_PROVIDER_BASE_URL: &str = "https://openrouter.ai/api/v1";
@@ -21,23 +28,62 @@ pub const DEFAULT_PROVIDER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 /// Environment variable that carries the API key — the *only* source.
 pub const API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
 
+/// Default cap on provider calls per run (loop, stage 1.9).
+pub const DEFAULT_MAX_TURNS: u32 = 50;
+
+/// Default cumulative `total_tokens` budget per run (loop, stage 1.9) —
+/// the sum of the usage reported by every response in the run.
+pub const DEFAULT_MAX_TOKENS_BUDGET: u64 = 250_000;
+
 /// Layered configuration values (no secrets, by design).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     /// OpenAI-compatible provider endpoint.
     #[serde(default = "default_base_url")]
     pub provider_base_url: String,
+    /// Hard cap on provider calls per run (loop, stage 1.9).
+    #[serde(default = "default_max_turns")]
+    pub max_turns: u32,
+    /// Cumulative `total_tokens` budget per run (loop, stage 1.9).
+    #[serde(default = "default_max_tokens_budget")]
+    pub max_tokens_budget: u64,
+    /// Per-tool permission policy overlay — `tool = "allow" | "deny" |
+    /// "ask"` (stage 1.9). Unlisted tools fall back to the built-in
+    /// policy: reads allowed, everything else asks.
+    #[serde(default)]
+    pub permissions: BTreeMap<String, Decision>,
 }
 
 fn default_base_url() -> String {
     DEFAULT_PROVIDER_BASE_URL.to_string()
 }
 
+fn default_max_turns() -> u32 {
+    DEFAULT_MAX_TURNS
+}
+
+fn default_max_tokens_budget() -> u64 {
+    DEFAULT_MAX_TOKENS_BUDGET
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             provider_base_url: default_base_url(),
+            max_turns: default_max_turns(),
+            max_tokens_budget: default_max_tokens_budget(),
+            permissions: BTreeMap::new(),
         }
+    }
+}
+
+impl Config {
+    /// The permission gate these settings describe: `[permissions]`
+    /// entries overlay the built-in per-tool policy (stage 1.9). The
+    /// loop installs it in the [`ToolContext`](crate::tools::ToolContext)
+    /// so every dispatch passes through it.
+    pub fn permission_gate(&self) -> Gate {
+        Arc::new(PolicyGate::new(self.permissions.clone()))
     }
 }
 
@@ -94,6 +140,15 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         let table: toml::Table = toml::from_str(toml_text)?;
         if table.contains_key("provider_base_url") {
             config.provider_base_url = file.provider_base_url;
+        }
+        if table.contains_key("max_turns") {
+            config.max_turns = file.max_turns;
+        }
+        if table.contains_key("max_tokens_budget") {
+            config.max_tokens_budget = file.max_tokens_budget;
+        }
+        if table.contains_key("permissions") {
+            config.permissions = file.permissions;
         }
     }
 
@@ -336,5 +391,64 @@ mod tests {
     #[test]
     fn api_key_detection_is_case_insensitive_on_key_name() {
         assert!(api_key_in_file("API_KEY = \"x\"\n"));
+    }
+
+    // --- loop limits + permission policy (stage 1.9) ----------------------
+
+    #[test]
+    fn loop_limits_and_permissions_have_sane_defaults() {
+        let cfg = load(None, &map(&[]), None);
+        assert_eq!(cfg.max_turns, DEFAULT_MAX_TURNS);
+        assert_eq!(cfg.max_tokens_budget, DEFAULT_MAX_TOKENS_BUDGET);
+        assert!(cfg.permissions.is_empty());
+    }
+
+    #[test]
+    fn file_layer_sets_loop_limits_and_permission_policy() {
+        let cfg = load(
+            Some(
+                r#"
+                max_turns = 7
+                max_tokens_budget = 12345
+
+                [permissions]
+                run_command = "deny"
+                read_file = "allow"
+                "#,
+            ),
+            &map(&[]),
+            None,
+        );
+        assert_eq!(cfg.max_turns, 7);
+        assert_eq!(cfg.max_tokens_budget, 12345);
+        assert_eq!(cfg.permissions.get("run_command"), Some(&Decision::Deny));
+        assert_eq!(cfg.permissions.get("read_file"), Some(&Decision::Allow));
+    }
+
+    #[test]
+    fn invalid_permission_value_fails_the_load() {
+        let err = load_config(&ConfigInputs {
+            file_toml: Some("[permissions]\nread_file = \"maybe\"\n"),
+            env: &map(&[]),
+            flag_base_url: None,
+        })
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn permission_gate_applies_overlay_and_builtin_defaults() {
+        let cfg = load(
+            Some("[permissions]\nrun_command = \"allow\"\n"),
+            &map(&[]),
+            None,
+        );
+        let gate = cfg.permission_gate();
+        // Config overlay wins …
+        assert_eq!(gate.check("run_command", "{}"), Decision::Allow);
+        // … builtin defaults cover the rest: reads allowed, the rest asks.
+        assert_eq!(gate.check("read_file", "{}"), Decision::Allow);
+        assert_eq!(gate.check("list_dir", "{}"), Decision::Allow);
+        assert_eq!(gate.check("write_file", "{}"), Decision::Ask);
     }
 }
