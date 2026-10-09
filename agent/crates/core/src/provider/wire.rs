@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn plain_text_conversation_serializes_to_wire_shape() {
         let wire = request_to_wire(request(vec![
-            Message::text(Role::System, "You are ferro."),
+            Message::text(Role::System, "You are iris."),
             Message::text(Role::User, "hello"),
         ]));
         assert_eq!(
@@ -400,7 +400,7 @@ mod tests {
             json!({
                 "model": "test-model",
                 "messages": [
-                    {"role": "system", "content": "You are ferro."},
+                    {"role": "system", "content": "You are iris."},
                     {"role": "user", "content": "hello"}
                 ]
             })

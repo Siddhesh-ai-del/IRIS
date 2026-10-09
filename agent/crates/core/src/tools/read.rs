@@ -61,7 +61,7 @@ impl Tool for ReadTool {
         let mut content = String::from_utf8_lossy(&buffer).into_owned();
         if truncated {
             content.push_str(&format!(
-                "\n\n[ferro: file truncated — showing first {MAX_READ_BYTES} bytes]"
+                "\n\n[iris: file truncated — showing first {MAX_READ_BYTES} bytes]"
             ));
         }
 
@@ -116,7 +116,7 @@ mod tests {
         assert!(
             result
                 .content
-                .contains("[ferro: file truncated — showing first"),
+                .contains("[iris: file truncated — showing first"),
             "truncation must be visible, never silent"
         );
         assert!(result.content.len() < big.len());

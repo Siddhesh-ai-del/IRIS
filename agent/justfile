@@ -1,4 +1,4 @@
-# ferro — task runner (stage 0.1 deliverable)
+# iris — task runner (stage 0.1 deliverable)
 # Targets: fmt, lint, test, cov (plan §Phase 0.1)
 
 default: help

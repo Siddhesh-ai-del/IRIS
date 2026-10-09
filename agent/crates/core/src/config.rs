@@ -1,7 +1,7 @@
 //! Layered configuration (stage 0.2).
 //!
 //! Precedence (lowest → highest): defaults → config file
-//! (`~/.config/ferro/config.toml`) → `$FERRO_*` env vars → CLI flags.
+//! (`~/.config/iris/config.toml`) → `$IRIS_*` env vars → CLI flags.
 //!
 //! **Security invariant:** the API key is resolved *only* from
 //! `OPENROUTER_API_KEY` in the process environment (or keyring, later) —
@@ -47,7 +47,7 @@ impl Default for Config {
 pub struct ConfigInputs<'a> {
     /// Raw TOML of the config file, if it exists.
     pub file_toml: Option<&'a str>,
-    /// Process environment (or any map) for `$FERRO_*` lookups.
+    /// Process environment (or any map) for `$IRIS_*` lookups.
     pub env: &'a HashMap<String, String>,
     /// CLI `--base-url` value, the highest-precedence layer.
     pub flag_base_url: Option<&'a str>,
@@ -61,8 +61,8 @@ pub enum ConfigError {
     InvalidBaseUrl(String),
 }
 
-/// Resolve the config file path: `$FERRO_CONFIG` (explicit override) →
-/// `$XDG_CONFIG_HOME/ferro/config.toml` → `$HOME/.config/ferro/config.toml`.
+/// Resolve the config file path: `$IRIS_CONFIG` (explicit override) →
+/// `$XDG_CONFIG_HOME/iris/config.toml` → `$HOME/.config/iris/config.toml`.
 /// Returns `None` when no base directory can be determined. Empty values
 /// are treated as unset.
 pub fn config_file_path(env: &HashMap<String, String>) -> Option<PathBuf> {
@@ -73,13 +73,13 @@ pub fn config_file_path(env: &HashMap<String, String>) -> Option<PathBuf> {
             .map(PathBuf::from)
     };
 
-    if let Some(explicit) = non_empty("FERRO_CONFIG") {
+    if let Some(explicit) = non_empty("IRIS_CONFIG") {
         return Some(explicit);
     }
     if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
-        return Some(xdg.join("ferro").join("config.toml"));
+        return Some(xdg.join("iris").join("config.toml"));
     }
-    non_empty("HOME").map(|home| home.join(".config").join("ferro").join("config.toml"))
+    non_empty("HOME").map(|home| home.join(".config").join("iris").join("config.toml"))
 }
 
 /// Apply the four configuration layers and validate the result.
@@ -99,7 +99,7 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
 
     if let Some(url) = inputs
         .env
-        .get("FERRO_PROVIDER_BASE_URL")
+        .get("IRIS_PROVIDER_BASE_URL")
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
     {
@@ -183,7 +183,7 @@ mod tests {
     fn env_layer_overrides_file() {
         let cfg = load(
             Some("provider_base_url = \"https://file.example/v1\""),
-            &map(&[("FERRO_PROVIDER_BASE_URL", "https://env.example/v1")]),
+            &map(&[("IRIS_PROVIDER_BASE_URL", "https://env.example/v1")]),
             None,
         );
         assert_eq!(cfg.provider_base_url, "https://env.example/v1");
@@ -193,7 +193,7 @@ mod tests {
     fn flag_layer_overrides_env() {
         let cfg = load(
             Some("provider_base_url = \"https://file.example/v1\""),
-            &map(&[("FERRO_PROVIDER_BASE_URL", "https://env.example/v1")]),
+            &map(&[("IRIS_PROVIDER_BASE_URL", "https://env.example/v1")]),
             Some("https://flag.example/v1"),
         );
         assert_eq!(cfg.provider_base_url, "https://flag.example/v1");
@@ -203,7 +203,7 @@ mod tests {
     fn empty_env_value_is_ignored_not_downgraded_to_empty_string() {
         let cfg = load(
             Some("provider_base_url = \"https://file.example/v1\""),
-            &map(&[("FERRO_PROVIDER_BASE_URL", "")]),
+            &map(&[("IRIS_PROVIDER_BASE_URL", "")]),
             None,
         );
         assert_eq!(cfg.provider_base_url, "https://file.example/v1");
@@ -257,7 +257,7 @@ mod tests {
         let env = map(&[("HOME", "/home/u")]);
         assert_eq!(
             config_file_path(&env),
-            Some(PathBuf::from("/home/u/.config/ferro/config.toml"))
+            Some(PathBuf::from("/home/u/.config/iris/config.toml"))
         );
     }
 
@@ -266,16 +266,16 @@ mod tests {
         let env = map(&[("HOME", "/home/u"), ("XDG_CONFIG_HOME", "/custom/xdg")]);
         assert_eq!(
             config_file_path(&env),
-            Some(PathBuf::from("/custom/xdg/ferro/config.toml"))
+            Some(PathBuf::from("/custom/xdg/iris/config.toml"))
         );
     }
 
     #[test]
-    fn config_path_ferro_config_overrides_all() {
+    fn config_path_iris_config_overrides_all() {
         let env = map(&[
             ("HOME", "/home/u"),
             ("XDG_CONFIG_HOME", "/custom/xdg"),
-            ("FERRO_CONFIG", "/explicit/config.toml"),
+            ("IRIS_CONFIG", "/explicit/config.toml"),
         ]);
         assert_eq!(
             config_file_path(&env),
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn config_path_treats_empty_values_as_unset() {
-        let env = map(&[("FERRO_CONFIG", ""), ("HOME", "")]);
+        let env = map(&[("IRIS_CONFIG", ""), ("HOME", "")]);
         assert_eq!(config_file_path(&env), None);
     }
 

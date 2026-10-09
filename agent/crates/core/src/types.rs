@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn snapshot_full_conversation_json() {
         let convo = vec![
-            Message::text(Role::System, "You are ferro."),
+            Message::text(Role::System, "You are iris."),
             Message::text(Role::User, "Read main.rs"),
             Message {
                 role: Role::Assistant,

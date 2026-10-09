@@ -471,39 +471,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
-name = "ferro"
-version = "0.1.0"
-dependencies = [
- "clap",
- "ferro-core",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "ferro-core"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "diffy",
- "futures",
- "httpmock",
- "insta",
- "libc",
- "portable-pty",
- "proptest",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml",
- "url",
-]
-
-[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1020,6 +987,39 @@ name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
+
+[[package]]
+name = "iris"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "iris-core",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "iris-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "diffy",
+ "futures",
+ "httpmock",
+ "insta",
+ "libc",
+ "portable-pty",
+ "proptest",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "url",
+]
 
 [[package]]
 name = "is_terminal_polyfill"

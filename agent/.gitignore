@@ -6,8 +6,8 @@
 /coverage/
 /llvm-cov-target/
 
-# Ferro runtime state (sessions, checkpoints) lives outside the repo
-.ferro/
+# IRIS runtime state (sessions, checkpoints) lives outside the repo
+.iris/
 
 # Editor / OS
 .idea/

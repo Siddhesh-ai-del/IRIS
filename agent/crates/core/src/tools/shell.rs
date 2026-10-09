@@ -306,12 +306,12 @@ fn assemble_content(
     let mut content = output.to_string();
     if truncated {
         content.push_str(&format!(
-            "\n[ferro: output truncated at {MAX_OUTPUT_BYTES} bytes]"
+            "\n[iris: output truncated at {MAX_OUTPUT_BYTES} bytes]"
         ));
     }
     let is_error = if timed_out {
         content.push_str(&format!(
-            "\n[ferro: timed out after {}s — process killed]",
+            "\n[iris: timed out after {}s — process killed]",
             timeout.as_secs()
         ));
         true
@@ -321,11 +321,11 @@ fn assemble_content(
                 code,
                 signal: Some(signal),
             }) => {
-                content.push_str(&format!("\n[ferro: killed by {signal} (exit code {code})]"));
+                content.push_str(&format!("\n[iris: killed by {signal} (exit code {code})]"));
                 true
             }
             Some(ExitFacts { code, signal: None }) if code != 0 => {
-                content.push_str(&format!("\n[ferro: exit code {code}]"));
+                content.push_str(&format!("\n[iris: exit code {code}]"));
                 true
             }
             _ => false,
@@ -401,7 +401,7 @@ mod tests {
         };
         let (content, is_error) =
             assemble_content("boom\n", Some(exit), false, false, Duration::from_secs(60));
-        assert!(content.contains("[ferro: exit code 3]"), "{content}");
+        assert!(content.contains("[iris: exit code 3]"), "{content}");
         assert!(is_error);
     }
 
@@ -414,7 +414,7 @@ mod tests {
         let (content, is_error) =
             assemble_content("gone\n", Some(exit), false, false, Duration::from_secs(60));
         assert!(
-            content.contains("[ferro: killed by SIGKILL (exit code 1)]"),
+            content.contains("[iris: killed by SIGKILL (exit code 1)]"),
             "{content}"
         );
         assert!(is_error);
@@ -426,7 +426,7 @@ mod tests {
             assemble_content("partial", None, true, false, Duration::from_secs(1));
         assert!(content.starts_with("partial"));
         assert!(
-            content.contains("[ferro: timed out after 1s — process killed]"),
+            content.contains("[iris: timed out after 1s — process killed]"),
             "{content}"
         );
         assert!(is_error);
@@ -440,7 +440,7 @@ mod tests {
         };
         let (content, is_error) =
             assemble_content("big", Some(exit), false, true, Duration::from_secs(60));
-        assert!(content.contains("[ferro: output truncated"), "{content}");
+        assert!(content.contains("[iris: output truncated"), "{content}");
         assert!(!is_error, "truncation alone is not an error");
     }
 
@@ -482,7 +482,7 @@ mod tests {
         let result = run(&ctx, "exit 3", None).await.unwrap();
         assert!(result.is_error);
         assert!(
-            result.content.contains("[ferro: exit code 3]"),
+            result.content.contains("[iris: exit code 3]"),
             "{:?}",
             result.content
         );
@@ -515,7 +515,7 @@ mod tests {
         let result = run(&ctx, "seq 1 300000", None).await.unwrap();
         assert!(result.content.len() <= MAX_OUTPUT_BYTES + 200);
         assert!(
-            result.content.contains("[ferro: output truncated at"),
+            result.content.contains("[iris: output truncated at"),
             "truncation must be visible"
         );
     }
@@ -535,7 +535,7 @@ mod tests {
         assert!(
             result
                 .content
-                .contains("[ferro: timed out after 1s — process killed]"),
+                .contains("[iris: timed out after 1s — process killed]"),
             "{:?}",
             result.content
         );

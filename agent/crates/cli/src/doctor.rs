@@ -1,9 +1,9 @@
-//! `ferro doctor` — report effective configuration and key *presence*
+//! `iris doctor` — report effective configuration and key *presence*
 //! only. Key material is never formatted into output (stage 0.2 Done-when).
 
 use std::collections::HashMap;
 
-use ferro_core::config::{self, ConfigInputs};
+use iris_core::config::{self, ConfigInputs};
 
 /// Print provider/key status. Returns the process exit code.
 pub fn run(base_url_flag: Option<&str>, env: &HashMap<String, String>) -> i32 {
@@ -40,7 +40,7 @@ pub fn run(base_url_flag: Option<&str>, env: &HashMap<String, String>) -> i32 {
         }
     };
 
-    println!("ferro doctor");
+    println!("iris doctor");
     println!("  config file       : {file_desc}");
     println!(
         "  provider base URL : {} (source: {})",
@@ -72,7 +72,7 @@ fn describe_base_url_source(
     file_toml: Option<&str>,
 ) -> &'static str {
     let env_sets = env
-        .get("FERRO_PROVIDER_BASE_URL")
+        .get("IRIS_PROVIDER_BASE_URL")
         .is_some_and(|v| !v.trim().is_empty());
 
     let file_sets = file_toml

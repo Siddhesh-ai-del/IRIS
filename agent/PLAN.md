@@ -1,4 +1,4 @@
-# FERRO — Implementation Plan (TDD)
+# IRIS — Implementation Plan (TDD)
 
 > **Terminal-based AI coding agent in Rust.** Derived from the deep-research brief
 > `outputs/rust-terminal-coding-agent.md` (provenance: `outputs/rust-terminal-coding-agent.provenance.md`).
@@ -17,7 +17,7 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Project/binary name: **ferro** (crates: `ferro-core`, `ferro` binary) | ✅ confirmed |
+| D1 | Project/binary name: **iris** (crates: `iris-core`, `iris` binary) | ✅ confirmed |
 | D2 | Execution mode: **pause after each stage** for sign-off | ✅ confirmed |
 | D3 | v1 targets **Linux/macOS only** (Windows deferred) | ✅ confirmed (default) |
 | D4 | Providers: **OpenRouter only for now** (OpenAI-compatible API, own SSE client — not `genai`); native Anthropic `/v1/messages` client deferred (OpenRouter serves Anthropic models through the same API). Base URL configurable, default `https://openrouter.ai/api/v1` | ✅ confirmed (revised) |
@@ -27,7 +27,7 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 ## TDD conventions (per stage, mandatory)
 
 - RED → GREEN → REFACTOR; a stage is not done until tests that were failing now pass.
-- Coverage ≥80% on `ferro-core` (security-critical code — path confinement, redaction, permission gate — targets 100%).
+- Coverage ≥80% on `iris-core` (security-critical code — path confinement, redaction, permission gate — targets 100%).
 - Immutability: builder/`with_*` methods, no mutation of shared state.
 - No hardcoded secrets: API keys only from env/keyring, never config files.
 - Each stage: single binary deliverable + `Done when` check + risk rating.
@@ -63,7 +63,7 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 - `agent/` is now a git repo (root commit `ff4831d`); `IRIS/` is a separate repo.
 - Stage 0.1 gate: `just test` green (1 passed), `cargo clippy --all-targets -- -D warnings` clean.
 - Stage 0.2 gate: `just test` green (26 passed — 21 config precedence + 5 doctor CLI),
-  clippy clean, `ferro doctor` smoke verified (no key leak). `cargo llvm-cov` deferred:
+  clippy clean, `iris doctor` smoke verified (no key leak). `cargo llvm-cov` deferred:
   needs `llvm-tools` component (slow download) — required by stage 7.2, not 0.2.
 - Stage 1.1 gate: 38 tests green (17 types: round-trips, wire-shape, insta snapshot),
   clippy clean. insta needs `features = ["json"]` for `assert_json_snapshot!`.
@@ -127,24 +127,24 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 - [x] **0.1 Install toolchain + scaffold workspace** (1h) — done 2026-10-07
   - Install `rustup` (stable, minimal profile), `cargo-nextest`, `cargo-llvm-cov`, `just`
     (binary installers preferred over `cargo install` given slow network; `pacman` needs the user).
-    Create workspace at `agent/` with `crates/core` (`ferro-core`) and `crates/cli` (`ferro` binary);
+    Create workspace at `agent/` with `crates/core` (`iris-core`) and `crates/cli` (`iris` binary);
     `rust-toolchain.toml` pinned; `.cargo/config.toml` with `clippy -D warnings`; `justfile` targets:
     `fmt`, `lint`, `test`, `cov`; `git init` + conventional commits from here on.
   - **Done when:** `just test` runs an empty suite green; `cargo clippy -- -D warnings` clean.
   - Risk: Low (env setup) · Network-dependent.
 
 - [x] **0.2 CLI + config skeleton** (1h) — done 2026-10-07
-  - Deviation: layering hand-rolled in `ferro-core::config` (defaults → file →
-    `$FERRO_*` env → flags) instead of `config-rs`, because config-rs's env source
+  - Deviation: layering hand-rolled in `iris-core::config` (defaults → file →
+    `$IRIS_*` env → flags) instead of `config-rs`, because config-rs's env source
     reads process env directly (unsafe/racy to mutate under edition 2024 tests) and
     can't be tested hermetically. Same precedence, injected env-map inputs.
-  - Extra: `FERRO_CONFIG` env override for config path; `--base-url` global flag;
+  - Extra: `IRIS_CONFIG` env override for config path; `--base-url` global flag;
     `doctor` warns if config file contains `api_key` (never reads it).
   - `crates/cli/src/main.rs` with `clap 4` subcommands `run`, `chat`, `sessions`, `doctor`;
-    `config-rs` layering (defaults → `~/.config/ferro/config.toml` → `$FERRO_*` env → flags);
+    `config-rs` layering (defaults → `~/.config/iris/config.toml` → `$IRIS_*` env → flags);
     provider base URL config (default `https://openrouter.ai/api/v1`);
     API key loading **only** from env/keyring (`OPENROUTER_API_KEY`), never config file.
-  - **Done when:** `ferro doctor` prints provider/key status without leaking key material;
+  - **Done when:** `iris doctor` prints provider/key status without leaking key material;
     unit tests for config precedence (RED first).
   - Risk: Low · Depends: 0.1
 
@@ -234,7 +234,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     reader always returns even if a grandchild holds the pty); poll-loop
     `try_wait` reap (keeps `&mut child` for the kill); timeout →
     `killpg(SIGKILL)` (portable-pty `setsid`s the child = group leader)
-    + direct kill; explicit `[ferro: …]` trailers for exit code /
+    + direct kill; explicit `[iris: …]` trailers for exit code /
     signal death / timeout / truncation. Note: interactive stdin not
     supported (stdin reads block until timeout kill) — future work.
   - Tests: registry gate seam asserts the tool body **never ran**
@@ -274,7 +274,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   **Done when:** `httpmock` cassette test runs a full 3-turn tool-using conversation to completion;
   loop file ≤250 LoC. Risk: **High** (core of the product) · Depends: 1.3, 1.6, 1.7, 1.8
 
-- [ ] **1.10 Headless `run -p` mode** (1h) — `ferro run -p "prompt" --workdir <dir>`: streams text
+- [ ] **1.10 Headless `run -p` mode** (1h) — `iris run -p "prompt" --workdir <dir>`: streams text
   to stdout, tool events to stderr, exit code = agent outcome. CI parity item + **test harness for
   everything after this**. Risk: Low · Depends: 1.9
 
@@ -364,7 +364,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 ### Phase 6 — Parity Features (5 stages, ~5h)
 
 - [ ] **6.1 Git-first checkpoints** (1h) — `checkpoint create/list/restore`: snapshot of
-  tracked+untracked state to `.ferro/checkpoints` (or orphan commits); shell side-effects
+  tracked+untracked state to `.iris/checkpoints` (or orphan commits); shell side-effects
   explicitly out of scope, documented. Risk: Medium · Depends: 1.9
 
 - [ ] **6.2 Compaction that fires** (1h) — threshold on *estimated* tokens (pre-request, not after
@@ -379,7 +379,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 - [ ] **6.4 Hooks/events** (1h) — `on_tool_pre`, `on_tool_post`, `on_turn_end`, `on_compact`:
   shell commands with timeout + JSON payload. Risk: Low · Depends: 1.9
 
-- [ ] **6.5 Custom commands/skills** (1h) — markdown files in `.ferro/commands/*.md` with
+- [ ] **6.5 Custom commands/skills** (1h) — markdown files in `.iris/commands/*.md` with
   frontmatter args → prompt templates; `/help` lists them. Risk: Low · Depends: 4.2
 
 ### Phase 7 — Quality Gate (4 stages, ~4h)
@@ -387,7 +387,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 - [ ] **7.1 HTTP cassette layer** (1h) — record/replay on `httpmock` covering streaming + tool loops
   for the OpenRouter (OpenAI-compatible) client; no live API needed in CI. Risk: Low · Depends: 1.3
 
-- [ ] **7.2 Coverage to ≥80% on `ferro-core`** (1h) — `cargo llvm-cov`; fill gaps (permission policy
+- [ ] **7.2 Coverage to ≥80% on `iris-core`** (1h) — `cargo llvm-cov`; fill gaps (permission policy
   matrix, assembly edge cases, redaction). Risk: Low · Depends: all
 
 - [ ] **7.3 E2E: real repo, temp git worktree** (1h) — scripted scenario: prompt → read → patch →
@@ -415,3 +415,9 @@ native Anthropic `/v1/messages` client (stage 1.4, when a direct `ANTHROPIC_API_
 - **MEDIUM:** SSE tool-delta assembly · TUI flicker (event-driven render, `TestBackend` snapshots,
   core TUI-free) · scope creep (deferred backlog; each phase ends runnable).
 - **Estimated:** ~46 one-hour stages ≈ 46 focused hours (~1.5 weeks full-time).
+
+- Repo layout (2026-10-09): the project was **renamed ferro → IRIS** and
+  lives in the IRIS monorepo at `agent/` (github.com/Siddhesh-ai-del/IRIS).
+  Stage commits are pushed to IRIS `origin/main` after each sign-off (D2).
+  `/home/siddhesh/Desktop/CLI/agent` is a stale pre-monorepo snapshot —
+  do not edit there.

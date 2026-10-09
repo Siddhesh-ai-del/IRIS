@@ -1,17 +1,17 @@
 [package]
-name = "ferro"
+name = "iris"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Terminal-based AI coding agent"
 
 [[bin]]
-name = "ferro"
+name = "iris"
 path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
-ferro-core = { path = "../core" }
+iris-core = { path = "../core" }
 toml = "1.1.6"
 
 [lints]

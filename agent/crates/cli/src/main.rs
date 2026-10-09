@@ -1,4 +1,4 @@
-//! `ferro` CLI entry point. Subcommands: `run`, `chat`, `sessions`, `doctor`
+//! `iris` CLI entry point. Subcommands: `run`, `chat`, `sessions`, `doctor`
 //! (stage 0.2 defines the surface; execution semantics land in stages 1.10+).
 
 mod doctor;
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "ferro", version, about = "Terminal-based AI coding agent")]
+#[command(name = "iris", version, about = "Terminal-based AI coding agent")]
 struct Cli {
     /// Override the provider base URL (highest-precedence config layer)
     #[arg(long, global = true, value_name = "URL")]
@@ -54,20 +54,20 @@ fn main() {
         Commands::Doctor => doctor::run(cli.base_url.as_deref(), &env),
         Commands::Run { prompt, workdir } => {
             eprintln!(
-                "ferro run is not implemented yet (stage 1.10): prompt={prompt:?}, workdir={}",
+                "iris run is not implemented yet (stage 1.10): prompt={prompt:?}, workdir={}",
                 workdir.display()
             );
             2
         }
         Commands::Chat { workdir } => {
             eprintln!(
-                "ferro chat is not implemented yet (stage 4.x): workdir={}",
+                "iris chat is not implemented yet (stage 4.x): workdir={}",
                 workdir.display()
             );
             2
         }
         Commands::Sessions => {
-            eprintln!("ferro sessions is not implemented yet (stage 2.3)");
+            eprintln!("iris sessions is not implemented yet (stage 2.3)");
             2
         }
     };

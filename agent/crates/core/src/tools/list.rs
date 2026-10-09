@@ -69,7 +69,7 @@ impl Tool for ListTool {
         };
         if truncated {
             content.push_str(&format!(
-                "\n[ferro: showing first {MAX_LIST_ENTRIES} entries]"
+                "\n[iris: showing first {MAX_LIST_ENTRIES} entries]"
             ));
         }
 
@@ -151,9 +151,7 @@ mod tests {
 
         let result = list(&fix, "").unwrap();
         assert!(
-            result
-                .content
-                .contains("[ferro: showing first 500 entries]"),
+            result.content.contains("[iris: showing first 500 entries]"),
             "truncation must be visible"
         );
         let lines = result.content.lines().count();

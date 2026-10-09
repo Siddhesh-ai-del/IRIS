@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn ctx() -> ToolContext {
-        ToolContext::new("/tmp/ferro-workspace")
+        ToolContext::new("/tmp/iris-workspace")
     }
 
     #[tokio::test]

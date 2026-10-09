@@ -1,9 +1,9 @@
 [package]
-name = "ferro-core"
+name = "iris-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Headless core loop for the ferro terminal coding agent"
+description = "Headless core loop for the iris terminal coding agent"
 
 [dependencies]
 bytes = "1.12.1"
