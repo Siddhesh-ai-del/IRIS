@@ -1,0 +1,52 @@
+---
+source: crates/core/src/types.rs
+expression: convo
+---
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are ferro."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Read main.rs"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Reading it now."
+      },
+      {
+        "type": "tool_use",
+        "id": "call_1",
+        "name": "read",
+        "input": {
+          "path": "src/main.rs"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "call_1",
+        "content": "fn main() {}\n",
+        "is_error": false
+      }
+    ]
+  }
+]

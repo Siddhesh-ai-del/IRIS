@@ -1,0 +1,16 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Coverage
+/coverage/
+/llvm-cov-target/
+
+# Ferro runtime state (sessions, checkpoints) lives outside the repo
+.ferro/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

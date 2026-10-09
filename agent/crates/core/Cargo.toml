@@ -1,0 +1,31 @@
+[package]
+name = "ferro-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Headless core loop for the ferro terminal coding agent"
+
+[dependencies]
+bytes = "1.12.1"
+diffy = "0.5.2"
+futures = "0.3.34"
+libc = "0.2.190"
+portable-pty = "0.9.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
+schemars = { version = "1.2.2", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "signal", "time"] }
+toml = "1.1.6"
+url = "2.5.8"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+httpmock = "0.8.3"
+insta = { version = "1.49.0", features = ["json"] }
+libc = "0.2.190"
+proptest = "1.11.0"
+tempfile = "3.27.0"
