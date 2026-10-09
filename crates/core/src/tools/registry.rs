@@ -6,6 +6,7 @@
 //! backs the `schemars` JSON Schema sent to the model) before the tool
 //! body can run. Invalid JSON never reaches a tool.
 
+use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -15,6 +16,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use super::permissions::{AllowAll, Decision};
 use crate::provider::ToolSpec;
 use crate::types::ToolResult;
 
@@ -48,6 +50,19 @@ pub enum ToolError {
     #[error("path escapes the workspace: {path}")]
     PathEscape { path: String },
 
+    /// The permission gate refused the call — security event (stage
+    /// 1.7). The tool body never ran.
+    #[error("permission denied for `{tool}`: {detail}")]
+    Denied { tool: String, detail: String },
+
+    /// The gate returned `Ask`, but nothing here can prompt — dispatch
+    /// fails closed until the caller resolves it (stage 1.9 wires the
+    /// ask flow before dispatch).
+    #[error(
+        "permission requires confirmation for `{tool}` — resolve `ask` before dispatch: {detail}"
+    )]
+    NeedsConfirmation { tool: String, detail: String },
+
     /// The tool body failed (IO, spawn, patch apply, …).
     #[error("`{tool}` failed: {message}")]
     Failed { tool: String, message: String },
@@ -55,20 +70,40 @@ pub enum ToolError {
 
 /// Context handed to every tool invocation.
 ///
-/// Cheap to clone (`PathBuf` today; `Arc`'d services join in stages 1.7
-/// and 3.x), so the registry can move one into each dispatch future.
-#[derive(Clone, Debug)]
+/// Cheap to clone, so the registry can move one into each dispatch
+/// future.
+#[derive(Clone)]
 pub struct ToolContext {
     /// Absolute workspace root. Filesystem tools must be confined to it
     /// (stage 1.6 rejects `..`/symlink escapes).
     pub workspace_root: PathBuf,
+
+    /// Gate every dispatch passes through (stage 1.7). [`ToolContext::new`]
+    /// installs [`AllowAll`] for tests and scaffolding; production wiring
+    /// installs the config-backed policy gate (stage 1.9).
+    pub permissions: super::permissions::Gate,
 }
 
 impl ToolContext {
+    /// Policy-free context (`AllowAll`) — tests and scaffolding only.
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        Self::with_gate(workspace_root, Arc::new(AllowAll))
+    }
+
+    /// Context carrying an explicit permission gate.
+    pub fn with_gate(workspace_root: impl Into<PathBuf>, gate: super::permissions::Gate) -> Self {
         Self {
             workspace_root: workspace_root.into(),
+            permissions: gate,
         }
+    }
+}
+
+impl fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("workspace_root", &self.workspace_root)
+            .finish_non_exhaustive()
     }
 }
 
@@ -195,6 +230,24 @@ impl ToolRegistry {
         args: Value,
     ) -> Result<ToolResult, ToolError> {
         let tool = self.lookup(name)?;
+        // The gate guards dispatch (stage 1.7): nothing reaches a tool
+        // body past a `Deny`, and an unresolved `Ask` fails closed.
+        let detail = args.to_string();
+        match ctx.permissions.check(name, &detail) {
+            Decision::Allow => {}
+            Decision::Deny => {
+                return Err(ToolError::Denied {
+                    tool: name.to_string(),
+                    detail,
+                });
+            }
+            Decision::Ask => {
+                return Err(ToolError::NeedsConfirmation {
+                    tool: name.to_string(),
+                    detail,
+                });
+            }
+        }
         let result = (tool.run)(ctx.clone(), args).await?;
         Ok(ToolResult {
             tool_use_id: tool_use_id.to_string(),
@@ -455,5 +508,99 @@ mod tests {
             .unwrap();
         assert!(!first.load(Ordering::SeqCst), "first registration replaced");
         assert!(second.load(Ordering::SeqCst), "second registration active");
+    }
+
+    // --- Permission gate seam (stage 1.7) -------------------------------
+
+    fn gated_ctx(gate: super::super::permissions::Gate) -> (tempfile::TempDir, ToolContext) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ctx = ToolContext::with_gate(dir.path(), gate);
+        (dir, ctx)
+    }
+
+    #[tokio::test]
+    async fn deny_gate_blocks_dispatch_before_the_body_runs() {
+        let executed = Arc::new(AtomicBool::new(false));
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool {
+            executed: Arc::clone(&executed),
+        });
+        let (_tmp, ctx) = gated_ctx(Arc::new(super::super::permissions::DenyAll));
+
+        let err = registry
+            .execute("echo", &ctx, "c", serde_json::json!({"text": "hi"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::Denied { .. }), "got {err:?}");
+        assert!(
+            !executed.load(Ordering::SeqCst),
+            "denied tool body must never run"
+        );
+    }
+
+    #[tokio::test]
+    async fn unresolved_ask_fails_closed_never_runs_the_body() {
+        let executed = Arc::new(AtomicBool::new(false));
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool {
+            executed: Arc::clone(&executed),
+        });
+        let (_tmp, ctx) = gated_ctx(Arc::new(|_: &str, _: &str| Decision::Ask));
+
+        let err = registry
+            .execute("echo", &ctx, "c", serde_json::json!({"text": "hi"}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::NeedsConfirmation { .. }),
+            "got {err:?}"
+        );
+        assert!(!executed.load(Ordering::SeqCst), "ask must fail closed");
+    }
+
+    #[tokio::test]
+    async fn closure_gate_can_target_a_single_tool() {
+        let executed = Arc::new(AtomicBool::new(false));
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool {
+            executed: Arc::clone(&executed),
+        });
+        // Per-tool policy: only "echo" is denied; anything else allowed.
+        let (_tmp, ctx) = gated_ctx(Arc::new(|tool: &str, _detail: &str| {
+            if tool == "echo" {
+                Decision::Deny
+            } else {
+                Decision::Allow
+            }
+        }));
+
+        let err = registry
+            .execute("echo", &ctx, "c", serde_json::json!({"text": "hi"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::Denied { .. }), "got {err:?}");
+        assert!(
+            registry
+                .execute("nope", &ctx, "c", serde_json::json!({}))
+                .await
+                .is_err_and(|e| matches!(e, ToolError::UnknownTool { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_context_still_dispatches_normally() {
+        let executed = Arc::new(AtomicBool::new(false));
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool {
+            executed: Arc::clone(&executed),
+        });
+        let (_tmp, ctx) = gated_ctx(Arc::new(|_: &str, _: &str| Decision::Allow));
+
+        let result = registry
+            .execute("echo", &ctx, "c", serde_json::json!({"text": "hi"}))
+            .await
+            .unwrap();
+        assert_eq!(result.content, "hi");
+        assert!(executed.load(Ordering::SeqCst));
     }
 }

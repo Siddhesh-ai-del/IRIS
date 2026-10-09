@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.7 (Shell tool via `portable-pty`; 1.4 deferred under D4)
+- **Next action:** Stage 1.8 (`apply_patch` tool via `diffy`; 1.4 deferred under D4)
 - **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09; 1.4 skipped)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09; 1.4 skipped)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -96,6 +96,15 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
   **100% coverage target for this stage is verified at 7.2** (`cargo-llvm-cov`
   still deferred — llvm-tools download too slow here); proptest defaults
   (256 cases) — rerun-stable 3/3.
+- Stage 1.7 gate: 149 tests green (25 new), fmt + clippy clean. Deps
+  added: `portable-pty 0.9`, `libc` (promoted dev → prod, for
+  `killpg`/`fcntl(O_NONBLOCK)`/`EIO`). portable-pty 0.9 notes: no
+  `new_default_shell` — resolve via `CommandBuilder::new(..).get_shell()`
+  ($SHELL → passwd db); its `ExitStatus` is crate-owned
+  (`exit_code() -> u32`, `signal() -> Option<&str>`); unix spawn does
+  `setsid` + `TIOCSCTTY` (child = session+group leader → `killpg`
+  reaches grandchildren); `CommandBuilder::new` inherits the env by
+  default. `ToolContext` is now gate-carrying (manual `Debug`).
 
 ---
 
@@ -199,8 +208,34 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     attempts through the registry). fmt + clippy clean.
   Risk: Medium (security) · Depends: 1.5
 
-- [ ] **1.7 Shell tool via `portable-pty`** (1h) — PTY spawn, streamed stdout/stderr capture,
-  timeout + kill, **always routed through the permission gate**. Risk: Medium · Depends: 1.5
+- [x] **1.7 Shell tool via `portable-pty`** (1h) — done 2026-10-09
+  - **Permission gate seam landed now** (the stage demands the shell tool
+    is *always routed through* it): `tools/permissions.rs`
+    (`Decision{Allow,Deny,Ask}` + `PermissionGate` + `AllowAll`/`DenyAll` +
+    closure impl); `ToolContext` gains `permissions` (`new()` = AllowAll
+    for tests, `with_gate()` for wiring); **registry gates dispatch**
+    (uniform + forget-proof, not per-tool): new auditable
+    `ToolError::Denied` / `ToolError::NeedsConfirmation` (unresolved `Ask`
+    fails closed). 1.9 later installs the config-backed policy gate.
+  - `run_command` tool: real PTY (`portable-pty 0.9`), user's shell
+    (`$SHELL` → passwd-db fallback) with `-c`; PTY merges stdout+stderr
+    (inherent — schema says so); streamed capture on a worker thread over
+    a **non-blocking** master fd (no pty-buffer deadlock, keeps draining
+    past the 256 KiB cap so the child never stalls, hard deadline so the
+    reader always returns even if a grandchild holds the pty); poll-loop
+    `try_wait` reap (keeps `&mut child` for the kill); timeout →
+    `killpg(SIGKILL)` (portable-pty `setsid`s the child = group leader)
+    + direct kill; explicit `[ferro: …]` trailers for exit code /
+    signal death / timeout / truncation. Note: interactive stdin not
+    supported (stdin reads block until timeout kill) — future work.
+  - Tests: registry gate seam asserts the tool body **never ran**
+    (executed flag); end-to-end marker-file proof that a denied command
+    never spawns; kill proof (`sleep 2 && touch marker` under 1s timeout
+    leaves no marker); pipeline proves shell parsing (shell-agnostic —
+    `$SHELL` here is **fish**, so tests avoid bash-isms); CRLF
+    normalization; timeout cap/clamp; signal-death trailer. 149 tests
+    green (25 new), timing-sensitive tests rerun-stable 5/5.
+  Risk: Medium · Depends: 1.5
 
 - [ ] **1.8 `apply_patch` tool with `diffy`** (1h) — model emits unified diff → `diffy::apply`
   with fallback to whole-file write on fuzz failure (targets KQ2.4 edit-apply pain).

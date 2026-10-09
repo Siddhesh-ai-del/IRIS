@@ -8,6 +8,8 @@ description = "Headless core loop for the ferro terminal coding agent"
 [dependencies]
 bytes = "1.12.1"
 futures = "0.3.34"
+libc = "0.2.190"
+portable-pty = "0.9.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
 schemars = { version = "1.2.2", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
