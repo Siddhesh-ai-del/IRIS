@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 1.10 (headless `run -p` mode; 1.4 deferred under D4)
-- **Current phase:** 1 — Headless Core Loop
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09)
+- **Next action:** Stage 2.1 (JSONL transcript schema v0 — Phase 2 opens)
+- **Current phase:** 1 — Headless Core Loop (complete); next: 2 — Session Durability
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -300,9 +300,34 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     (18 new), fmt + clippy clean, loop suite rerun-stable 3/3.
   Risk: High · Depends: 1.3, 1.6, 1.7, 1.8
 
-- [ ] **1.10 Headless `run -p` mode** (1h) — `iris run -p "prompt" --workdir <dir>`: streams text
-  to stdout, tool events to stderr, exit code = agent outcome. CI parity item + **test harness for
-  everything after this**. Risk: Low · Depends: 1.9
+- [x] **1.10 Headless `run -p` mode** (1h) — done 2026-10-10
+  - `crates/cli/src/run.rs`: `iris run -p "prompt" --workdir <dir>
+    [--model <slug>]` runs the 1.9 loop with `DenyOnAsk` and all five
+    tools registered. Model text streams to **stdout** (flushed per
+    delta, trailing newline ensured); tool events + the run summary go
+    to **stderr** (`[iris] …` lines), so stdout stays pipeable.
+  - **Exit code = agent outcome** (documented in `--help`): 0
+    completed · 1 error (config/key/provider/IO) · 3 `max_turns` · 4
+    token budget — 2 stays reserved for clap usage errors. Missing key
+    and bad workdir fail **before** any provider traffic.
+  - **E2E test harness** (`crates/cli/tests/common/mod.rs` +
+    `tests/run.rs`): hermetic binary spawn (`IRIS_CONFIG` → nonexistent
+    path, key stripped) + httpmock provider + SSE builders — the
+    harness every later stage's E2E test builds on. 7 E2E tests: the
+    Done-when cassette (tool conversation through the real binary,
+    stdout/stderr separation, turn mocks matched on transcript growth),
+    headless `write_file` denial (file never created, denial fed back,
+    run still completes), missing key → exit 1 with **zero** provider
+    hits, `max_turns`/budget → exit 3/4 with **exactly one** provider
+    hit (limits checked before the call, through the binary), provider
+    500 → exit 1, missing workdir → exit 1.
+  - `--model` flag (default `openai/gpt-4o-mini`) — config still does
+    not select models (1.9 note); the flag is the caller-chosen seam
+    `LoopOptions::from_config` expects. 193 tests green (10 new: 7
+    E2E + 3 `first_line` unit), fmt + clippy clean, E2E rerun-stable
+    3/3, manual smoke (`run` without key → exit 1, `--help` documents
+    the exit-code table).
+  Risk: Low · Depends: 1.9
 
 ### Phase 2 — Session Durability (4 stages, ~4h) — wedge #2 foundation
 

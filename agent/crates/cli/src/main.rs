@@ -2,6 +2,7 @@
 //! (stage 0.2 defines the surface; execution semantics land in stages 1.10+).
 
 mod doctor;
+mod run;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -22,6 +23,9 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Run a one-shot prompt headlessly
+    ///
+    /// Exit code = agent outcome: 0 completed · 1 error · 3 max turns ·
+    /// 4 token budget exceeded.
     Run {
         /// Prompt to execute
         #[arg(short = 'p', long, value_name = "PROMPT")]
@@ -30,6 +34,10 @@ enum Commands {
         /// Working directory for the agent
         #[arg(long, value_name = "DIR", default_value = ".")]
         workdir: PathBuf,
+
+        /// Model id (OpenRouter slug)
+        #[arg(long, value_name = "MODEL", default_value = "openai/gpt-4o-mini")]
+        model: String,
     },
 
     /// Start an interactive chat session
@@ -52,13 +60,11 @@ fn main() {
 
     let code = match &cli.command {
         Commands::Doctor => doctor::run(cli.base_url.as_deref(), &env),
-        Commands::Run { prompt, workdir } => {
-            eprintln!(
-                "iris run is not implemented yet (stage 1.10): prompt={prompt:?}, workdir={}",
-                workdir.display()
-            );
-            2
-        }
+        Commands::Run {
+            prompt,
+            workdir,
+            model,
+        } => run::run(prompt, model, workdir, cli.base_url.as_deref(), &env),
         Commands::Chat { workdir } => {
             eprintln!(
                 "iris chat is not implemented yet (stage 4.x): workdir={}",
