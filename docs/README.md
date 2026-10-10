@@ -13,14 +13,13 @@ that is still under active development.
 | [../SECURITY.md](../SECURITY.md) | Private vulnerability reporting and security scope |
 | [../SUPPORT.md](../SUPPORT.md) | Where to get help |
 | [../CHANGELOG.md](../CHANGELOG.md) | Release history |
+| [transcript-schema.md](transcript-schema.md) | Versioned, open JSONL session format (v0) |
 
 ## Planned documentation
 
 As implementation progresses, this directory is expected to grow to include:
 
 - **User guide** — installation, first run, configuration reference.
-- **Transcript schema** — the versioned, open JSONL session format, documented
-  publicly from day one so external tools can read it.
 - **Configuration reference** — layering rules, environment variables, provider setup.
 - **Hooks and custom commands** — extension points for project-local automation.
 

@@ -16,6 +16,7 @@ schemars = { version = "1.2.2", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["serde-well-known"] }
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "signal", "time"] }
 toml = "1.1.6"
 url = "2.5.8"

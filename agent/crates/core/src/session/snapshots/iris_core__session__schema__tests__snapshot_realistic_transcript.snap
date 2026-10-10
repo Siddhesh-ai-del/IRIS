@@ -1,0 +1,11 @@
+---
+source: crates/core/src/session/schema.rs
+assertion_line: 492
+expression: "lines.join(\"\\n\")"
+---
+{"v":0,"type":"session_start","session_id":"ses_test","started_at":"2023-11-14T22:13:20Z","cwd":"/home/u/proj","model":"openai/gpt-4o-mini","iris_version":"0.1.0"}
+{"v":0,"type":"message","role":"user","content":[{"type":"text","text":"read Cargo.toml"}]}
+{"v":0,"type":"message","role":"assistant","content":[{"type":"text","text":"Reading it now."},{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"Cargo.toml"}}]}
+{"v":0,"type":"message","role":"tool","content":[{"type":"tool_result","tool_use_id":"call_1","content":"[package]\nname = \"iris\"\n","is_error":false}]}
+{"v":0,"type":"usage","turn":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154}}
+{"v":0,"type":"session_end","outcome":"completed","turns":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154},"ended_at":"2023-11-14T22:13:20Z"}

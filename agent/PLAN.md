@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 2.1 (JSONL transcript schema v0 — Phase 2 opens)
-- **Current phase:** 1 — Headless Core Loop (complete); next: 2 — Session Durability
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10)
+- **Next action:** Stage 2.2 (crash-safe append writer)
+- **Current phase:** 2 — Session Durability (in progress); next: 2.2
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -331,9 +331,18 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 2 — Session Durability (4 stages, ~4h) — wedge #2 foundation
 
-- [ ] **2.1 JSONL transcript schema v0** (1h) — `crates/core/src/session/schema.rs`: versioned
-  envelope (`{"v":0,"type":...}`), one JSON object per line; write `docs/transcript-schema.md`
-  from day one (D5). Risk: Low · Depends: 1.1
+- [x] **2.1 JSONL transcript schema v0** (1h) — done 2026-10-10
+  - `crates/core/src/session/schema.rs`: versioned envelope `{"v":0,"type":...}`
+    (`Envelope`/`Event`/`SchemaError`), one JSON object per line; events
+    `session_start` / `message` / `usage` / `session_end`; RFC3339 timestamps
+    via `time::serde::rfc3339` (new dep: `time` 0.3).
+  - Reader **rejects** unknown `v`, missing `v`/`type`, and unknown `type`
+    (`UnknownType`) — never skips a line (silent skips = resume amnesia);
+    tolerates `\n`/`\r\n` from `BufRead`.
+  - `docs/transcript-schema.md` written from day one (D5), enforced by a test
+    that fails if the doc is missing or drops an event type.
+  - **Done when:** tests above red → green; 210 total green, clippy/fmt clean.
+  - Risk: Low · Depends: 1.1
 
 - [ ] **2.2 Crash-safe append writer** (1h) — append + `fsync`, session manifest via
   temp-file+rename; `proptest` crash injection (truncate at any byte → `sessions load` still
