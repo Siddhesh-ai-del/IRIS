@@ -34,8 +34,9 @@ Use the **Feature request** template. Strong proposals describe:
 
 ## Code contributions
 
-Code contribution guidelines will be published once the workspace skeleton is in
-place. Planned standards that apply from the first commit:
+The workspace skeleton is in place, so code contributions follow the staged
+implementation plan in [`agent/PLAN.md`](agent/PLAN.md). Standards that apply
+from the first commit:
 
 - **Test-driven development.** Red → green → refactor. A change is not done
   until previously failing tests pass.

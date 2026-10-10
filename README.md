@@ -35,85 +35,122 @@ public issue trackers of every major terminal coding agent:
 - **Secrets on disk.** `.env` contents and credentials echoed verbatim into local transcripts.
 - **Review friction.** Diffs that are hard to comprehend and permissions that are either noisy or silently ignored.
 
-## Planned capabilities
+## Capabilities
 
-> The items below describe the intended scope of IRIS. **None of them are shipped yet** —
-> see [Project status](#project-status). Nothing in this repository is released software.
+Development status is tracked in the [implementation plan](agent/PLAN.md). Items marked
+✅ have landed in `main` but are **not part of a release yet** — nothing here is
+released software.
 
-- **Headless mode** — non-interactive, scriptable runs with machine-readable output for CI.
-- **Interactive TUI** — streaming markdown, diff views, and a permission prompt you can actually trust.
-- **Live cost gauges** — cache hit %, cost, TTFT, and tokens/sec in the status bar.
-- **Crash-safe sessions** — append-only transcripts with resume and a rebuildable local index.
-- **Workspace checkpoints** — snapshot and restore your working state around agent activity.
-- **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
-- **Permission gate** — per-tool `allow` / `deny` / `ask` policy, enforced for every tool call.
-- **MCP support** — external tools surfaced through the same registry and permission gate.
-- **Hooks and custom commands** — project-local automation without forking the agent.
+- ✅ **Headless mode** — `iris run -p "…"` non-interactive runs: model text streams to
+  stdout, tool events go to stderr, and the exit code is the agent outcome (CI-scriptable).
+- ✅ **Permission gate** — per-tool `allow` / `deny` / `ask` policy from config, enforced
+  for every tool call; headless runs fail closed.
+- 🚧 **Crash-safe sessions** — append-only, versioned JSONL transcripts with resume and a
+  rebuildable local index (Phase 2, in progress).
+- 📋 **Live cost gauges** — cache hit %, cost, TTFT, and tokens/sec in the status bar.
+- 📋 **Interactive TUI** — streaming markdown, diff views, and a permission prompt you can actually trust.
+- 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
+- 📋 **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
+- 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
+- 📋 **Hooks and custom commands** — project-local automation without forking the agent.
 
 ## Project status
 
-**IRIS is pre-release.** No implementation has landed yet. This repository currently
-hosts the product's public documentation while development ramps up.
+**IRIS is pre-release and under active development.** Phases 0 and 1 of the
+[implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered
+configuration, the OpenRouter client with SSE streaming, five tools behind a
+config-backed permission gate, and the headless agent loop have landed and are
+runnable via `iris run -p` — all under test-driven development (190+ tests).
+There are no versioned releases yet.
 
 ### Roadmap
 
-All phases are in the **Planned** state. Details are tracked in the internal
-implementation plan; this table reflects it at a high level.
+Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at a high level.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | Toolchain and workspace skeleton | Planned |
-| 1 | Headless agent core loop (providers, streaming, tools, permissions) | Planned |
-| 2 | Session durability (transcript schema, crash-safe writes, resume) | Planned |
+| 0 | Toolchain and workspace skeleton | ✅ Complete |
+| 1 | Headless agent core loop (providers, streaming, tools, permissions) | ✅ Complete |
+| 2 | Session durability (transcript schema, crash-safe writes, resume) | 🚧 In progress |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | Planned |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | Planned |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
-Deferred beyond v1: Windows support, worktree replay A/B, local (GGUF) inference mode.
+Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
+and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
+support, worktree replay A/B, local (GGUF) inference mode.
 
 ## Installation
 
-**Not yet available.** IRIS has no releases. When a first release ships, install
-instructions will appear here and on the [releases page](../../releases).
+**No releases yet** — IRIS has no published binaries. When a first release ships,
+install instructions will appear here and on the [releases page](../../releases).
+
+To use it today, build from source (Rust toolchain is pinned in
+[`agent/rust-toolchain.toml`](agent/rust-toolchain.toml)):
+
+```bash
+git clone https://github.com/Siddhesh-ai-del/IRIS
+cd IRIS/agent
+cargo build --release
+```
+
+Then export your OpenRouter key and try the headless mode:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-v1-…   # never read from a config file
+./target/release/iris doctor
+./target/release/iris run -p "list the files here and summarize what this project is"
+```
+
+`iris run -p` streams model text to stdout, tool events to stderr, and exits with
+the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).
 
 ## Architecture
 
-IRIS is intended to be a single Rust binary organized as a Cargo workspace:
+IRIS is a single Rust binary organized as a Cargo workspace under `agent/`:
 
-- **Core** — provider-agnostic agent loop, tool registry, permission gate, session
-  store, prompt assembly, and metrics. Fully headless: no TUI code in the core.
-- **CLI** — argument parsing and configuration layering (defaults → user config →
-  environment → flags).
-- **TUI** — a thin presentation layer driven by events emitted from the core.
+- **`iris-core`** — provider-agnostic agent loop, tool registry, permission gate,
+  session store, prompt assembly, and metrics. Fully headless: no TUI code in the core.
+- **`iris` (CLI)** — argument parsing, configuration layering (defaults → file →
+  environment → flags), and the headless runner.
+- **TUI** — a thin presentation layer driven by events emitted from the core
+  (planned, Phase 4).
 
-The transcript format is a versioned, append-only JSONL schema intended to be
-documented publicly from day one so that other tools can read it.
+Provider access today is OpenRouter's OpenAI-compatible API with a hand-rolled SSE
+client. The transcript format is a versioned, append-only JSONL schema, documented
+publicly from day one so that other tools can read it.
 
 ## Repository layout
-
-This repository intentionally contains no source code yet.
 
 ```
 IRIS/
 ├── README.md          # You are here
-├── CHANGELOG.md       # Release history (none yet)
+├── CHANGELOG.md       # Release history (nothing released yet)
 ├── CONTRIBUTING.md    # How to contribute
 ├── CODE_OF_CONDUCT.md # Community standards
 ├── SECURITY.md        # Vulnerability reporting
 ├── SUPPORT.md         # Where to get help
 ├── LICENSE            # Apache License 2.0
 ├── docs/              # Product documentation (growing with the project)
-└── .github/           # Issue and pull request templates
+├── .github/           # Issue and pull request templates
+└── agent/             # Cargo workspace — all source code lives here
+    ├── PLAN.md        # Implementation plan (single source of truth)
+    ├── justfile       # fmt / lint / test / cov / ci
+    └── crates/
+        ├── core/      # iris-core — loop, tools, config, provider, sessions
+        └── cli/       # iris — the terminal binary (run, chat, sessions, doctor)
 ```
 
 ## Contributing
 
-IRIS is in early development. The most useful contributions right now are
-reproducible bug reports and well-scoped feature ideas — see
-[CONTRIBUTING.md](CONTRIBUTING.md) and the issue templates. Code contributions
-will open up once the workspace skeleton lands.
+IRIS is in early development and follows a staged TDD plan. The most useful
+contributions right now are reproducible bug reports and well-scoped feature
+ideas — see [CONTRIBUTING.md](CONTRIBUTING.md) and the issue templates. Code
+contributions are welcome for planned stages: read the
+[implementation plan](agent/PLAN.md) first so your work lines up with what is
+being built next.
 
 ## Security
 

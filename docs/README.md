@@ -1,8 +1,8 @@
 # IRIS Documentation
 
 This directory holds IRIS's product documentation. The documentation set grows
-alongside the project — IRIS is pre-release and nothing documented here is
-shipped software yet.
+alongside the project — IRIS is pre-release, and everything here tracks software
+that is still under active development.
 
 ## Contents
 
