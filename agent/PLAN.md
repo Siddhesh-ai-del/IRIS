@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 2.2 (crash-safe append writer)
-- **Current phase:** 2 — Session Durability (in progress); next: 2.2
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10)
+- **Next action:** Stage 2.3 (`sessions list` / `sessions resume`)
+- **Current phase:** 2 — Session Durability (in progress); next: 2.3
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -344,9 +344,22 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   - **Done when:** tests above red → green; 210 total green, clippy/fmt clean.
   - Risk: Low · Depends: 1.1
 
-- [ ] **2.2 Crash-safe append writer** (1h) — append + `fsync`, session manifest via
-  temp-file+rename; `proptest` crash injection (truncate at any byte → `sessions load` still
-  recovers all complete lines). Risk: Medium · Depends: 2.1
+- [x] **2.2 Crash-safe append writer** (1h) — done 2026-10-10
+  - `crates/core/src/session/writer.rs`: `TranscriptWriter::create` (manifest
+    via tmp + fsync + rename + dir fsync) / `append` (one `write_all` of
+    `line + \n`, then `fsync`) / `load` recovery / `load_manifest`; `Manifest`
+    mirrors `session_start` so `sessions` can list without parsing transcripts.
+  - Session ids are path-confinement input: validated to `[A-Za-z0-9_-]+`
+    before any `join` (traversal tests: `../evil`, `a/b`, `..`, empty…).
+  - Recovery rule: newline-terminated lines must parse (else `CorruptLine`,
+    fail loudly); an unterminated tail is kept **iff** it parses — the only
+    parseable prefix of a single top-level JSON object is the whole line, so a
+    torn write can never be accepted.
+  - `proptest` crash injection: truncate at any byte → recovered == prefix of
+    original, ≥ all terminated lines, ≤ +1 tail line, exact when uncut.
+  - **Done when:** tests above red (10 failed) → green; 220 total green,
+    clippy/fmt clean.
+  - Risk: Medium · Depends: 2.1
 
 - [ ] **2.3 `sessions list` / `sessions resume`** (1h) — resume rehydrates full history and resumes
   the loop mid-conversation (targets KQ2.2 "resume = amnesia").

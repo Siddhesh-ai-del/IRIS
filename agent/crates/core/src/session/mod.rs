@@ -3,3 +3,4 @@
 //! and the rebuildable sqlite index (2.4).
 
 pub mod schema;
+pub mod writer;
