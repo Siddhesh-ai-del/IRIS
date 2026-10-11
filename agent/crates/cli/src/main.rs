@@ -3,6 +3,7 @@
 
 mod doctor;
 mod run;
+mod sessions;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -48,10 +49,41 @@ enum Commands {
     },
 
     /// Manage saved sessions
-    Sessions,
+    Sessions {
+        #[command(subcommand)]
+        action: SessionCommands,
+    },
 
     /// Print provider and API key status without exposing secrets
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+enum SessionCommands {
+    /// List saved sessions, newest first
+    List,
+
+    /// Resume a session: rehydrate its full history and continue it
+    ///
+    /// The prior conversation is replayed to the model exactly as it
+    /// happened (including repair of a run killed mid-tool-call), then
+    /// the new prompt continues it. The transcript keeps growing.
+    Resume {
+        /// Session id, as shown by `sessions list`
+        id: String,
+
+        /// Prompt to continue the session with
+        #[arg(short = 'p', long, value_name = "PROMPT")]
+        prompt: String,
+
+        /// Working directory (defaults to the session's saved cwd)
+        #[arg(long, value_name = "DIR")]
+        workdir: Option<PathBuf>,
+
+        /// Model id (defaults to the session's saved model)
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
+    },
 }
 
 fn main() {
@@ -72,10 +104,22 @@ fn main() {
             );
             2
         }
-        Commands::Sessions => {
-            eprintln!("iris sessions is not implemented yet (stage 2.3)");
-            2
-        }
+        Commands::Sessions { action } => match action {
+            SessionCommands::List => sessions::list(&env),
+            SessionCommands::Resume {
+                id,
+                prompt,
+                workdir,
+                model,
+            } => sessions::resume(
+                id,
+                prompt,
+                model.as_deref(),
+                workdir.as_deref(),
+                cli.base_url.as_deref(),
+                &env,
+            ),
+        },
     };
 
     std::process::exit(code);

@@ -15,12 +15,15 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use iris_core::agent_loop::{LoopEvent, LoopOptions, LoopOutcome, run};
+use iris_core::agent_loop::{
+    LoopEvent, LoopOptions, LoopOutcome, Recorded, RunError, run, run_recorded,
+};
 use iris_core::config::{Config, ConfigInputs, load_config};
 use iris_core::provider::{
     CompletionRequest, CompletionResponse, EventStream, OpenAiClient, Provider, ProviderError,
     StreamEvent,
 };
+use iris_core::session::writer::WriterError;
 use iris_core::tools::{
     Decision, DenyOnAsk, ListTool, ReadTool, Tool, ToolContext, ToolError, ToolRegistry,
 };
@@ -645,4 +648,125 @@ async fn cassette_three_turn_tool_conversation_to_completion() {
     assert_eq!(turn1.calls(), 1, "each mock serves exactly its turn");
     assert_eq!(turn2.calls(), 1);
     assert_eq!(turn3.calls(), 1);
+}
+
+// --- durability recording (stage 2.3) ------------------------------------
+
+/// The recorder sees the conversation exactly as it grows — assistant
+/// message, that turn's usage, each tool result, then the next
+/// assistant message. Replaying the recorded messages reproduces the
+/// conversation the following provider request carried.
+#[tokio::test]
+async fn run_recorded_mirrors_the_conversation_in_transcript_order() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let scripted = Scripted::new(vec![
+        tool_response("c1", "touch_marker", json!({})),
+        text_response("all done", 7),
+    ]);
+    let registry = marker_registry(&fired);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+
+    let mut recorded: Vec<Recorded> = Vec::new();
+    let outcome = run_recorded(
+        &scripted,
+        &registry,
+        &ctx,
+        &allow_all,
+        &options(u32::MAX, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+        |event| {
+            recorded.push(event);
+            Ok(())
+        },
+    )
+    .await
+    .expect("loop must run");
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "got {outcome:?}"
+    );
+
+    assert_eq!(
+        recorded.len(),
+        5,
+        "assistant, usage, tool, assistant, usage — got {recorded:?}"
+    );
+    let role_of = |recorded: &Recorded| match recorded {
+        Recorded::Message(msg) => msg.role.clone(),
+        other => panic!("expected a message, got {other:?}"),
+    };
+    assert_eq!(role_of(&recorded[0]), Role::Assistant);
+    assert!(
+        matches!(&recorded[1], Recorded::Usage { turn: 1, usage } if usage.total_tokens == 15),
+        "turn 1 usage, got {:?}",
+        recorded[1]
+    );
+    assert_eq!(role_of(&recorded[2]), Role::Tool);
+    assert_eq!(role_of(&recorded[3]), Role::Assistant);
+    assert!(
+        matches!(&recorded[4], Recorded::Usage { turn: 2, usage } if usage.total_tokens == 7),
+        "turn 2 usage, got {:?}",
+        recorded[4]
+    );
+
+    // Recorded messages mirror the conversation the second request
+    // carried (minus the initial history the recorder was never handed)
+    // plus the final assistant message that ended the loop.
+    let recorded_messages: Vec<&Message> = recorded
+        .iter()
+        .filter_map(|event| match event {
+            Recorded::Message(msg) => Some(msg),
+            Recorded::Usage { .. } => None,
+        })
+        .collect();
+    let (final_answer, mirrored) = recorded_messages.split_last().unwrap();
+    assert_eq!(final_answer.role, Role::Assistant, "the loop's last act");
+    let request2 = &scripted.requests()[1];
+    assert_eq!(
+        *mirrored,
+        request2.messages[1..].iter().collect::<Vec<_>>(),
+        "recorder must mirror the exact messages the provider saw"
+    );
+}
+
+/// A transcript that cannot be written aborts the run *before* the next
+/// provider call — continuing would produce a session with amnesia.
+#[tokio::test]
+async fn run_recorded_aborts_on_the_first_recorder_failure() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let scripted = Scripted::new(vec![
+        tool_response("c1", "touch_marker", json!({})),
+        text_response("never reached", 7),
+    ]);
+    let registry = marker_registry(&fired);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+
+    let mut calls = 0;
+    let err = run_recorded(
+        &scripted,
+        &registry,
+        &ctx,
+        &allow_all,
+        &options(u32::MAX, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+        |_event| {
+            calls += 1;
+            Err(WriterError::Io(std::io::Error::other("disk full")).into())
+        },
+    )
+    .await
+    .expect_err("recorder failure must surface");
+    assert!(matches!(err, RunError::Transcript(_)), "got {err}");
+    assert_eq!(calls, 1, "the run aborts at the first failed append");
+    assert_eq!(
+        scripted.requests().len(),
+        1,
+        "no provider call after the transcript failed"
+    );
 }

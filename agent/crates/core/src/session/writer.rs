@@ -41,6 +41,35 @@ pub struct Manifest {
     pub started_at: OffsetDateTime,
 }
 
+impl Manifest {
+    /// Manifest for a brand-new session, stamped with the current time.
+    pub fn new(
+        session_id: impl Into<String>,
+        cwd: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            cwd: cwd.into(),
+            model: model.into(),
+            started_at: OffsetDateTime::now_utc(),
+        }
+    }
+
+    /// The `session_start` line this manifest describes — one source of
+    /// truth for the published manifest and the transcript's first line
+    /// (stage 2.3), so the two can never drift.
+    pub fn start_event(&self) -> Event {
+        Event::SessionStart {
+            session_id: self.session_id.clone(),
+            started_at: self.started_at,
+            cwd: self.cwd.clone(),
+            model: self.model.clone(),
+            iris_version: crate::VERSION.to_owned(),
+        }
+    }
+}
+
 /// A transcript file could not be written, read, or recovered.
 #[derive(Debug, thiserror::Error)]
 pub enum WriterError {
@@ -143,8 +172,9 @@ pub fn load_manifest(root: &Path, session_id: &str) -> Result<Manifest, WriterEr
     serde_json::from_str(&text).map_err(|e| WriterError::Manifest(e.to_string()))
 }
 
-/// `<root>/<session_id>.jsonl`, confined to `root`.
-fn transcript_path(root: &Path, session_id: &str) -> Result<PathBuf, WriterError> {
+/// `<root>/<session_id>.jsonl`, confined to `root` — where `sessions
+/// resume` (stage 2.3) finds a session's transcript.
+pub fn transcript_path(root: &Path, session_id: &str) -> Result<PathBuf, WriterError> {
     validate_session_id(session_id)?;
     Ok(root.join(format!("{session_id}.jsonl")))
 }
@@ -220,6 +250,31 @@ mod tests {
             model: "openai/gpt-4o-mini".into(),
             iris_version: "0.1.0".into(),
         }
+    }
+
+    /// Stage 2.3: the manifest stamps its own creation time and mirrors
+    /// exactly into the transcript's first line — one source of truth.
+    #[test]
+    fn manifest_new_stamps_now_and_mirrors_into_session_start() {
+        let created = Manifest::new("ses_new", "/w", "model-a");
+        let Event::SessionStart {
+            session_id,
+            started_at,
+            cwd,
+            model,
+            iris_version,
+        } = created.start_event()
+        else {
+            panic!("start_event must produce session_start");
+        };
+        assert_eq!(session_id, "ses_new");
+        assert_eq!(cwd, "/w");
+        assert_eq!(model, "model-a");
+        assert_eq!(iris_version, crate::VERSION);
+        assert_eq!(
+            started_at, created.started_at,
+            "manifest and transcript must share one timestamp"
+        );
     }
 
     fn events() -> Vec<Event> {

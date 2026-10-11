@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 2.3 (`sessions list` / `sessions resume`)
-- **Current phase:** 2 — Session Durability (in progress); next: 2.3
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10)
+- **Next action:** Stage 2.4 (rusqlite session index)
+- **Current phase:** 2 — Session Durability (in progress); next: 2.4
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -361,9 +361,20 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
     clippy/fmt clean.
   - Risk: Medium · Depends: 2.1
 
-- [ ] **2.3 `sessions list` / `sessions resume`** (1h) — resume rehydrates full history and resumes
-  the loop mid-conversation (targets KQ2.2 "resume = amnesia").
-  **Done when:** E2E test — run, kill, resume, assert the model sees prior turns.
+- [x] **2.3 `sessions list` / `sessions resume`** (1h) — resume rehydrates full history and resumes
+  the loop mid-conversation (targets KQ2.2 "resume = amnesia"). ✅ 2026-10-11
+  **Done when:** E2E test — run, kill, resume, assert the model sees prior turns. ✅
+  `run_kill_resume_rehydrates_prior_turns`: run → SIGKILL mid-`run_command` →
+  `sessions resume` — the only answering mock demands the prior user turn, the
+  prior assistant tool call *and* the dangling-call repair in the request body.
+  Notes: `run` now persists every session (`session_start`/messages/usage/
+  `session_end`, id printed as `[iris] session <id>`); loop gained
+  `run_recorded` + `Recorded` (recorder errors abort the run —
+  `RunError::Transcript`, no silent amnesia); resume repairs an unanswered
+  `tool_use` at read time (synthetic error `tool_result`, never written back);
+  sessions root: `IRIS_SESSIONS_DIR` → `XDG_DATA_HOME` → `HOME/.local/share`;
+  resume defaults workdir/model from the manifest. 26 new tests
+  (19 core + 7 E2E); 246 total green, clippy/fmt clean.
   Risk: Medium · Depends: 2.2, 1.10
 
 - [ ] **2.4 rusqlite session index** (1h) — fast `sessions list` (cwd, turns, tokens, cost,

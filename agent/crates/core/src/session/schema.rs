@@ -96,6 +96,20 @@ pub enum SchemaError {
     UnknownType(String),
 }
 
+impl Event {
+    /// The `session_end` line for a finished run, stamped with the
+    /// current time. Callers cannot forget the timestamp; the outcome
+    /// comes from the loop's [`Outcome`] mapping (stage 2.3).
+    pub fn session_end(outcome: Outcome, turns: u32, usage: Usage) -> Self {
+        Event::SessionEnd {
+            outcome,
+            turns,
+            usage,
+            ended_at: OffsetDateTime::now_utc(),
+        }
+    }
+}
+
 impl Envelope {
     /// An envelope stamped with the current [`SCHEMA_VERSION`].
     pub fn new(event: Event) -> Self {

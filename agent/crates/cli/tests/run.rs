@@ -14,7 +14,20 @@ mod common;
 
 use common::{iris, sse_body, text_delta, tool_delta};
 use httpmock::prelude::*;
+use iris_core::session::schema::{Event, Outcome};
+use iris_core::session::writer::load;
 use serde_json::json;
+use std::path::Path;
+
+/// The final event of the single session in a store — the run's
+/// `session_end` when it was recorded at all.
+fn last_event_of_single_session(store: &Path) -> Option<Event> {
+    let entry = std::fs::read_dir(store)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))?;
+    load(&entry.path()).ok()?.pop()
+}
 
 /// The stage's Done-when: a full tool conversation through the real
 /// binary — turn 1 calls `read_file`, turn 2 answers in text. Turn 2 is
@@ -60,6 +73,7 @@ fn run_streams_text_to_stdout_and_tool_events_to_stderr() {
         .arg("Please inspect the demo workspace.")
         .arg("--workdir")
         .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
         .env("IRIS_PROVIDER_BASE_URL", server.base_url())
         .output()
@@ -134,6 +148,7 @@ fn run_headless_denies_asking_tools_by_default() {
         .arg("please write the file")
         .arg("--workdir")
         .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
         .env("IRIS_PROVIDER_BASE_URL", server.base_url())
         .output()
@@ -205,6 +220,7 @@ fn run_max_turns_exits_distinctly_without_an_overshooting_call() {
         .arg("--workdir")
         .arg(dir.path())
         .env("IRIS_CONFIG", cfg.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
         .env("IRIS_PROVIDER_BASE_URL", server.base_url())
         .output()
@@ -214,6 +230,14 @@ fn run_max_turns_exits_distinctly_without_an_overshooting_call() {
     assert_eq!(out.status.code(), Some(3), "stderr: {stderr}");
     assert!(stderr.contains("max_turns"), "{stderr}");
     assert_eq!(tooly.calls(), 1, "no provider call past the turn limit");
+
+    // The stop is durable: the transcript records why the run ended.
+    let Some(Event::SessionEnd { outcome, .. }) =
+        last_event_of_single_session(&dir.path().join("sessions"))
+    else {
+        panic!("a max_turns stop must be recorded as session_end");
+    };
+    assert!(matches!(outcome, Outcome::MaxTurns), "got {outcome:?}");
 }
 
 /// The token budget stops the run with its own exit code — checked
@@ -246,6 +270,7 @@ fn run_budget_exceeded_exits_distinctly_without_an_overshooting_call() {
         .arg("--workdir")
         .arg(dir.path())
         .env("IRIS_CONFIG", cfg.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
         .env("IRIS_PROVIDER_BASE_URL", server.base_url())
         .output()
@@ -255,6 +280,17 @@ fn run_budget_exceeded_exits_distinctly_without_an_overshooting_call() {
     assert_eq!(out.status.code(), Some(4), "stderr: {stderr}");
     assert!(stderr.contains("budget"), "{stderr}");
     assert_eq!(tooly.calls(), 1, "no provider call past the token budget");
+
+    // The stop is durable: the transcript records why the run ended.
+    let Some(Event::SessionEnd { outcome, .. }) =
+        last_event_of_single_session(&dir.path().join("sessions"))
+    else {
+        panic!("a budget stop must be recorded as session_end");
+    };
+    assert!(
+        matches!(outcome, Outcome::BudgetExceeded),
+        "got {outcome:?}"
+    );
 }
 
 /// A provider failure aborts the run with exit 1 and a readable message.
@@ -273,6 +309,7 @@ fn run_provider_error_exits_one() {
         .arg("hi")
         .arg("--workdir")
         .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
         .env("IRIS_PROVIDER_BASE_URL", server.base_url())
         .output()

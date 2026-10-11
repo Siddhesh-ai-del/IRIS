@@ -80,7 +80,9 @@ order.
 
 ### `session_end`
 
-Last line of a **cleanly finished** transcript.
+Marks a **cleanly finished run**. A resumed session's transcript may contain an
+older `session_end` followed by more events (stage 2.3) — the **last** line is
+what tells you whether the most recent run finished.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -93,9 +95,9 @@ Last line of a **cleanly finished** transcript.
 {"v":0,"type":"session_end","outcome":"completed","turns":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154},"ended_at":"2023-11-14T22:13:20Z"}
 ```
 
-**Absence of `session_end` is meaningful**: it means the run was interrupted
-(crash, `SIGKILL`, provider error). Readers must treat such transcripts as
-resumable, not corrupt.
+**Absence of `session_end` as the last line is meaningful**: it means the most
+recent run was interrupted (crash, `SIGKILL`, provider error). Readers must
+treat such transcripts as resumable, not corrupt.
 
 ## Guarantees & non-guarantees
 
@@ -105,6 +107,13 @@ resumable, not corrupt.
   partial trailing line rather than fail the whole file.
 - **Guaranteed:** secret redaction happens *before* persistence (stage 5.x);
   transcripts never contain API keys.
+- **Reader behavior (IRIS ≥ 2.3):** a transcript that ends mid-tool-call (a run
+  killed between an assistant `tool_use` and its `tool_result`) would be
+  rejected by providers as-is. IRIS's own resume reader repairs this **at read
+  time** by appending a synthetic error `tool_result` per unanswered call —
+  the repair is never written back, so the file keeps recording only what
+  actually happened. External readers see the raw file; they must expect
+  dangling `tool_use` blocks in interrupted transcripts.
 - **Not guaranteed:** inter-line ordering beyond "append order"; transcripts are
   single-writer.
 

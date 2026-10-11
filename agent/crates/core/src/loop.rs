@@ -19,6 +19,8 @@ use futures::StreamExt;
 
 use crate::config::Config;
 use crate::provider::{CompletionRequest, Provider, ProviderError, StreamAssembler, StreamEvent};
+use crate::session::schema::Outcome;
+use crate::session::writer::WriterError;
 use crate::tools::permissions::{AskResolver, Decision, Gate};
 use crate::tools::{ToolContext, ToolRegistry};
 use crate::types::{ContentBlock, Message, Role, ToolCall, ToolResult, Usage};
@@ -85,6 +87,56 @@ pub enum LoopOutcome {
     BudgetExceeded { turns: u32, usage: Usage },
 }
 
+/// One conversation event the loop mirrors for durability (stage 2.3).
+///
+/// `run_recorded` hands these to its recorder in transcript order —
+/// assistant message, that turn's usage, then each tool result as it is
+/// dispatched — so a recorder writing them as `message`/`usage` events
+/// reproduces the conversation a resume will rehydrate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Recorded {
+    /// A message the loop just appended to the conversation.
+    Message(Message),
+    /// Token accounting for the response of this (1-based) turn.
+    Usage { turn: u32, usage: Usage },
+}
+
+/// Why a recording run stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum RunError {
+    /// The provider failed (transport, HTTP status, wire shape).
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    /// The transcript recorder could not persist a conversation event.
+    /// The loop **aborts** rather than continue into silent amnesia —
+    /// a transcript missing middle lines is worse than a failed run.
+    #[error("cannot record session transcript: {0}")]
+    Transcript(#[from] WriterError),
+}
+
+impl RunError {
+    /// Back to the provider-only error type. [`run`]'s recorder is a
+    /// no-op, so only a provider failure can surface.
+    fn into_provider(self) -> ProviderError {
+        match self {
+            RunError::Provider(err) => err,
+            RunError::Transcript(err) => {
+                panic!("agent_loop::run records nothing, got transcript error: {err}")
+            }
+        }
+    }
+}
+
+impl From<LoopOutcome> for Outcome {
+    fn from(outcome: LoopOutcome) -> Self {
+        match outcome {
+            LoopOutcome::Completed { .. } => Outcome::Completed,
+            LoopOutcome::MaxTurns { .. } => Outcome::MaxTurns,
+            LoopOutcome::BudgetExceeded { .. } => Outcome::BudgetExceeded,
+        }
+    }
+}
+
 /// Run one conversation to a stopping condition.
 ///
 /// `messages` is the initial transcript (system + user). `ctx` carries
@@ -102,8 +154,48 @@ pub async fn run<P: Provider, F: FnMut(LoopEvent<'_>)>(
     ask: &dyn AskResolver,
     opts: &LoopOptions,
     messages: Vec<Message>,
-    mut observer: F,
+    observer: F,
 ) -> Result<LoopOutcome, ProviderError> {
+    // Durability recorder: [`run`] records nothing — callers that want
+    // a transcript (stage 2.3) call [`run_recorded`] directly.
+    run_recorded(
+        provider,
+        registry,
+        ctx,
+        ask,
+        opts,
+        messages,
+        observer,
+        |_recorded| Ok(()),
+    )
+    .await
+    .map_err(RunError::into_provider)
+}
+
+/// [`run`], plus a durability recorder: the same conversation loop, but
+/// every conversation event is also handed to `recorder` as a
+/// [`Recorded`] in transcript order — assistant message, that turn's
+/// usage, then each tool result as it is dispatched (see [`Recorded`]).
+///
+/// `recorder` errors abort the run with [`RunError::Transcript`] — the
+/// transcript is the resume primitive (KQ2.2), so a run that cannot
+/// record its history must stop, not continue into amnesia.
+#[allow(clippy::too_many_arguments)] // one natural parameter set, not a growing bag
+pub async fn run_recorded<P, F, R>(
+    provider: &P,
+    registry: &ToolRegistry,
+    ctx: &ToolContext,
+    ask: &dyn AskResolver,
+    opts: &LoopOptions,
+    messages: Vec<Message>,
+    mut observer: F,
+    mut recorder: R,
+) -> Result<LoopOutcome, RunError>
+where
+    P: Provider,
+    F: FnMut(LoopEvent<'_>),
+    R: FnMut(Recorded) -> Result<(), RunError>,
+{
     let mut messages = messages;
     let mut usage = Usage::default();
     let mut turns = 0u32;
@@ -153,7 +245,12 @@ pub async fn run<P: Provider, F: FnMut(LoopEvent<'_>)>(
                 _ => None,
             })
             .collect();
+        recorder(Recorded::Message(response.message.clone()))?;
         messages.push(response.message);
+        recorder(Recorded::Usage {
+            turn: turns,
+            usage: response.usage.clone(),
+        })?;
 
         if calls.is_empty() {
             return Ok(LoopOutcome::Completed { text, turns, usage });
@@ -192,10 +289,12 @@ pub async fn run<P: Provider, F: FnMut(LoopEvent<'_>)>(
                 name: &call.name,
                 result: &result,
             });
-            messages.push(Message {
+            let tool_message = Message {
                 role: Role::Tool,
                 content: vec![ContentBlock::ToolResult(result)],
-            });
+            };
+            recorder(Recorded::Message(tool_message.clone()))?;
+            messages.push(tool_message);
         }
     }
 }

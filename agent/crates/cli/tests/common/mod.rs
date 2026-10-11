@@ -13,14 +13,17 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-/// A hermetic `iris` invocation: the real config file, the real API key
-/// and any ambient `IRIS_*` overrides are stripped; each test adds back
-/// exactly what it needs.
+/// A hermetic `iris` invocation: the real config file, the real API key,
+/// the real sessions store and any ambient `IRIS_*` overrides are
+/// stripped; each test adds back exactly what it needs (a `run`/`resume`
+/// test must pin `IRIS_SESSIONS_DIR` to a temp directory or it would
+/// write sessions into the developer's real store).
 pub fn iris() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_iris"));
     cmd.env("IRIS_CONFIG", "/nonexistent/iris-e2e-config.toml")
         .env_remove("OPENROUTER_API_KEY")
-        .env_remove("IRIS_PROVIDER_BASE_URL");
+        .env_remove("IRIS_PROVIDER_BASE_URL")
+        .env_remove("IRIS_SESSIONS_DIR");
     cmd
 }
 
