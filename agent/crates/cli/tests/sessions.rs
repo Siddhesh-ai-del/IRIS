@@ -346,6 +346,195 @@ fn run_kill_resume_rehydrates_prior_turns() {
     );
 }
 
+/// Stage 2.4: `sessions list` reads the rebuildable sqlite index —
+/// turns, tokens and last-active come from the JSONL, cost is a
+/// reserved column (`-` until stage 3.2 records it).
+#[test]
+fn sessions_list_reports_turns_tokens_and_last_active() {
+    let work = tempfile::tempdir().expect("temp workdir");
+    let sessions = tempfile::tempdir().expect("temp store");
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body(&text_delta("Counted."), "stop", (6, 4, 10)));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("count my tokens")
+        .arg("--workdir")
+        .arg(work.path())
+        .env("IRIS_SESSIONS_DIR", sessions.path())
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    reply.assert();
+
+    let listed = iris()
+        .arg("sessions")
+        .arg("list")
+        .env("IRIS_SESSIONS_DIR", sessions.path())
+        .output()
+        .expect("iris binary must run");
+    assert_eq!(
+        listed.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    let line = stdout.lines().next().expect("one session listed");
+    let cols: Vec<&str> = line.split('\t').collect();
+    assert_eq!(
+        cols.len(),
+        8,
+        "id, started_at, model, cwd, turns, tokens, last_active, cost: {line}"
+    );
+    assert_eq!(cols[4], "1", "one provider response: {line}");
+    assert_eq!(cols[5], "10", "tokens summed from the usage events: {line}");
+    assert!(
+        cols[6].contains('T') && cols[6].ends_with('Z'),
+        "last-active as RFC3339: {line}"
+    );
+    assert_eq!(cols[7], "-", "cost is reserved for stage 3.2: {line}");
+}
+
+/// The index is a cache, not a database of record: deleting
+/// `index.db` and re-listing rebuilds identical output from the JSONL.
+#[test]
+fn sessions_list_rebuilds_a_deleted_index() {
+    let work = tempfile::tempdir().expect("temp workdir");
+    let sessions = tempfile::tempdir().expect("temp store");
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body(&text_delta("Done."), "stop", (3, 2, 5)));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("warm the cache")
+        .arg("--workdir")
+        .arg(work.path())
+        .env("IRIS_SESSIONS_DIR", sessions.path())
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    reply.assert();
+
+    let list = |label: &str| -> String {
+        let out = iris()
+            .arg("sessions")
+            .arg("list")
+            .env("IRIS_SESSIONS_DIR", sessions.path())
+            .output()
+            .expect("iris binary must run");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{label} stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let first = list("cold");
+    let index_file = sessions.path().join("index.db");
+    assert!(
+        index_file.exists(),
+        "list maintains its cache at <store>/index.db"
+    );
+
+    std::fs::remove_file(&index_file).expect("throw the cache away");
+    let second = list("rebuild");
+    assert!(!first.is_empty());
+    assert_eq!(
+        first, second,
+        "the JSONL is the source of truth: a rebuilt index lists the same"
+    );
+}
+
+/// `sessions list --rebuild` forces a full re-parse regardless of the
+/// cached mtimes — and changes nothing about the answer.
+#[test]
+fn sessions_list_rebuild_flag_forces_a_refresh() {
+    let work = tempfile::tempdir().expect("temp workdir");
+    let sessions = tempfile::tempdir().expect("temp store");
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body(&text_delta("Done."), "stop", (3, 2, 5)));
+    });
+
+    for prompt in ["first prompt", "second prompt"] {
+        let out = iris()
+            .arg("run")
+            .arg("-p")
+            .arg(prompt)
+            .arg("--workdir")
+            .arg(work.path())
+            .env("IRIS_SESSIONS_DIR", sessions.path())
+            .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+            .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+            .output()
+            .expect("iris binary must run");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    assert_eq!(reply.calls(), 2, "both runs hit the provider");
+
+    let list = |rebuild: bool| -> String {
+        let mut command = iris();
+        command.arg("sessions").arg("list");
+        if rebuild {
+            command.arg("--rebuild");
+        }
+        let out = command
+            .env("IRIS_SESSIONS_DIR", sessions.path())
+            .output()
+            .expect("iris binary must run");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let plain = list(false);
+    let rebuilt = list(true);
+    assert_eq!(plain.lines().count(), 2, "two sessions: {plain}");
+    assert_eq!(
+        plain, rebuilt,
+        "forced re-parse from the JSONL reaches the same listing"
+    );
+}
+
 /// Resuming a session that does not exist is a clean error, not a
 /// panic or a new session.
 #[test]

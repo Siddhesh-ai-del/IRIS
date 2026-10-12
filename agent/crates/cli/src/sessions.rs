@@ -1,16 +1,19 @@
-//! `iris sessions` — list and resume saved sessions (stage 2.3).
+//! `iris sessions` — list and resume saved sessions (stage 2.3, index
+//! 2.4).
 //!
 //! A session is its JSONL transcript plus manifest in the sessions
-//! directory (2.2). `list` reads the manifests (no transcript parsing —
-//! stage 2.4 adds the rebuildable index for richer columns); `resume`
-//! rehydrates the full conversation and continues it through the same
-//! headless loop as `run` — resume is rehydration, never amnesia
-//! (KQ2.2), including repair of a run killed mid-tool-call.
+//! directory (2.2). `list` reads the rebuildable sqlite index (2.4) —
+//! refreshed from the JSONL on every call, degrading to manifest-only
+//! rows if SQLite is unavailable; `resume` rehydrates the full
+//! conversation and continues it through the same headless loop as
+//! `run` — resume is rehydration, never amnesia (KQ2.2), including
+//! repair of a run killed mid-tool-call.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use iris_core::session;
+use iris_core::session::index::{IndexError, SessionIndex, SessionRow};
 use iris_core::session::schema::Event;
 use iris_core::session::writer::{TranscriptWriter, load, load_manifest, transcript_path};
 use iris_core::types::{Message, Role};
@@ -18,9 +21,16 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::run::{self, EXIT_ERROR};
 
-/// `iris sessions list` — every saved session, newest first. One
-/// tab-separated line per session: id, started_at, model, cwd.
-pub fn list(env: &HashMap<String, String>) -> i32 {
+/// `iris sessions list` — every saved session, newest first (by
+/// last-active), from the index. One tab-separated line per session:
+/// id, started_at, model, cwd, turns, total_tokens, last_active, cost.
+///
+/// The index is a cache, not a database of record: `refresh`
+/// re-reads any transcript whose mtime moved, prunes rows whose
+/// transcript is gone, and `--rebuild` forces the full re-parse. If
+/// SQLite itself cannot be used, the listing degrades to manifest rows
+/// (identity without history) instead of failing.
+pub fn list(rebuild: bool, env: &HashMap<String, String>) -> i32 {
     let root = match session::store::sessions_root(env) {
         Ok(root) => root,
         Err(err) => {
@@ -28,17 +38,61 @@ pub fn list(env: &HashMap<String, String>) -> i32 {
             return EXIT_ERROR;
         }
     };
-    for manifest in session::store::list_sessions(&root) {
-        let started = manifest
-            .started_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| manifest.started_at.to_string());
-        println!(
-            "{}\t{started}\t{}\t{}",
-            manifest.session_id, manifest.model, manifest.cwd
-        );
+    if let Err(err) = list_indexed(&root, rebuild) {
+        eprintln!("[iris] warning: session index unavailable: {err}");
+        list_manifests(&root);
     }
     0
+}
+
+/// The indexed path: refresh (mtime-driven, or forced) then query.
+fn list_indexed(root: &Path, rebuild: bool) -> Result<(), IndexError> {
+    let mut index = SessionIndex::open(root)?;
+    index.refresh(rebuild)?;
+    for row in index.list()? {
+        print_row(&row);
+    }
+    Ok(())
+}
+
+/// The degraded path: manifests only — the sessions are listed, with
+/// zeroed aggregates, rather than hidden because a cache broke.
+fn list_manifests(root: &Path) {
+    for manifest in session::store::list_sessions(root) {
+        print_row(&SessionRow {
+            session_id: manifest.session_id,
+            cwd: manifest.cwd,
+            model: manifest.model,
+            started_at: manifest.started_at,
+            last_active: manifest.started_at,
+            turns: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            cost_usd: None,
+        });
+    }
+}
+
+/// One tab-separated row; both paths print identically so a fallback
+/// never changes the format.
+fn print_row(row: &SessionRow) {
+    let started = row
+        .started_at
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| row.started_at.to_string());
+    let last = row
+        .last_active
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| row.last_active.to_string());
+    let cost = row
+        .cost_usd
+        .map(|cost| format!("{cost:.4}"))
+        .unwrap_or_else(|| "-".into());
+    println!(
+        "{}\t{started}\t{}\t{}\t{}\t{}\t{last}\t{cost}",
+        row.session_id, row.model, row.cwd, row.turns, row.total_tokens
+    );
 }
 
 /// `iris sessions resume <id> -p …` — rehydrate the transcript and

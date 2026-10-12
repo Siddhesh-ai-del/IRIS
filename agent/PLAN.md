@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 2.4 (rusqlite session index)
-- **Current phase:** 2 — Session Durability (in progress); next: 2.4
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11)
+- **Next action:** Stage 3.1 (prefix-invariant prompt assembly)
+- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.1
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -377,8 +377,25 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   (19 core + 7 E2E); 246 total green, clippy/fmt clean.
   Risk: Medium · Depends: 2.2, 1.10
 
-- [ ] **2.4 rusqlite session index** (1h) — fast `sessions list` (cwd, turns, tokens, cost,
+- [x] **2.4 rusqlite session index** (1h) — fast `sessions list` (cwd, turns, tokens, cost,
   last-active); rebuildable from JSONL (index = cache, JSONL = source of truth).
+  ✅ 2026-10-12
+  Done when: `sessions list` reports turns/tokens/last-active from the index, and
+  deleting `index.db` + re-listing reproduces identical output. ✅
+  `sessions_list_reports_turns_tokens_and_last_active` (8 columns, cost `-`
+  until 3.2) and `sessions_list_rebuilds_a_deleted_index` (byte-identical
+  rebuild) / `sessions_list_rebuild_flag_forces_a_refresh`.
+  Notes: `iris_core::session::index` — rusqlite (`bundled`, no system dep),
+  `<store>/index.db`, one `sessions` table (`PRAGMA user_version = 1`); rows
+  keyed by transcript stem, aggregates summed from `usage` events (turns =
+  provider calls, lifetime across resumed runs), `last_active` = transcript
+  mtime (doubles as the cache key), `cost_usd` NULL until 3.2 fills it.
+  `refresh` re-parses changed mtimes, prunes vanished transcripts, `force`
+  re-parses all (`sessions list --rebuild`); a transcript that will not parse
+  falls back to its manifest (listed with zeroed aggregates — never hidden);
+  rows ordered last-active desc. CLI degrades to manifest rows with a warning
+  if SQLite itself is unavailable (cache failure ≠ list failure). 11 new tests
+  (8 core + 3 E2E); 257 total green, clippy/fmt clean.
   Risk: Low · Depends: 2.3
 
 ### Phase 3 — Cache-First Sessions (4 stages, ~4h) — **Wedge #1**

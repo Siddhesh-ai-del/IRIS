@@ -61,7 +61,12 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 enum SessionCommands {
     /// List saved sessions, newest first
-    List,
+    List {
+        /// Rebuild the index from the transcripts instead of trusting
+        /// the cache (the JSONL remains the source of truth)
+        #[arg(long)]
+        rebuild: bool,
+    },
 
     /// Resume a session: rehydrate its full history and continue it
     ///
@@ -105,7 +110,7 @@ fn main() {
             2
         }
         Commands::Sessions { action } => match action {
-            SessionCommands::List => sessions::list(&env),
+            SessionCommands::List { rebuild } => sessions::list(*rebuild, &env),
             SessionCommands::Resume {
                 id,
                 prompt,

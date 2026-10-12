@@ -45,8 +45,8 @@ released software.
   stdout, tool events go to stderr, and the exit code is the agent outcome (CI-scriptable).
 - ✅ **Permission gate** — per-tool `allow` / `deny` / `ask` policy from config, enforced
   for every tool call; headless runs fail closed.
-- 🚧 **Crash-safe sessions** — append-only, versioned JSONL transcripts with resume and a
-  rebuildable local index (Phase 2, in progress).
+- ✅ **Crash-safe sessions** — append-only, versioned JSONL transcripts with
+  resume and a rebuildable local index (Phase 2).
 - 📋 **Live cost gauges** — cache hit %, cost, TTFT, and tokens/sec in the status bar.
 - 📋 **Interactive TUI** — streaming markdown, diff views, and a permission prompt you can actually trust.
 - 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
@@ -56,12 +56,13 @@ released software.
 
 ## Project status
 
-**IRIS is pre-release and under active development.** Phases 0 and 1 of the
+**IRIS is pre-release and under active development.** Phases 0, 1 and 2 of the
 [implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered
 configuration, the OpenRouter client with SSE streaming, five tools behind a
-config-backed permission gate, and the headless agent loop have landed and are
-runnable via `iris run -p` — all under test-driven development (190+ tests).
-There are no versioned releases yet.
+config-backed permission gate, the headless agent loop, and durable sessions
+(crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
+index) have landed and are runnable via `iris run -p` — all under
+test-driven development (257 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -71,7 +72,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 |---|---|---|
 | 0 | Toolchain and workspace skeleton | ✅ Complete |
 | 1 | Headless agent core loop (providers, streaming, tools, permissions) | ✅ Complete |
-| 2 | Session durability (transcript schema, crash-safe writes, resume) | 🚧 In progress |
+| 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | Planned |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | Planned |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |

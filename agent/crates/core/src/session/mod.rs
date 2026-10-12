@@ -3,6 +3,7 @@
 //! and the rebuildable sqlite index (2.4).
 
 pub mod id;
+pub mod index;
 pub mod resume;
 pub mod schema;
 pub mod store;
