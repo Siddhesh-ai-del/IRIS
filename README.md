@@ -62,7 +62,7 @@ configuration, the OpenRouter client with SSE streaming, five tools behind a
 config-backed permission gate, the headless agent loop, and durable sessions
 (crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
 index) have landed and are runnable via `iris run -p` — all under
-test-driven development (257 tests). There are no versioned releases yet.
+test-driven development (267 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -73,7 +73,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 0 | Toolchain and workspace skeleton | ✅ Complete |
 | 1 | Headless agent core loop (providers, streaming, tools, permissions) | ✅ Complete |
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
-| 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | Planned |
+| 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | 🚧 In progress |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | Planned |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |

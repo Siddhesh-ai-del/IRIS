@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 3.1 (prefix-invariant prompt assembly)
-- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.1
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12)
+- **Next action:** Stage 3.2 (token accounting — tiktoken-rs + OpenRouter usage fields)
+- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.2
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -400,12 +400,32 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 3 — Cache-First Sessions (4 stages, ~4h) — **Wedge #1**
 
-- [ ] **3.1 Prefix-invariant prompt assembly** (1h) — `crates/core/src/assembly.rs`: stable ordering
+- [x] **3.1 Prefix-invariant prompt assembly** (1h) — `crates/core/src/assembly.rs`: stable ordering
   (system blocks, tool schema sorted by name, history), **stable serialization** (no `HashMap`
   iteration in output), no volatile content (timestamps, absolute paths, random ids) in the prefix;
-  tools/system changes detected and reported as a *cache-bust event*.
+  tools/system changes detected and reported as a *cache-bust event*. ✅ 2026-10-13
   **Done when:** same session + same config ⇒ byte-identical request prefix (golden test, run twice
-  with randomized `HashMap` seeds). Risk: **High** · Depends: 1.9
+  with randomized `HashMap` seeds). ✅ `prefix_bytes_are_byte_identical_across_randomized_hashmap_seeds`
+  (golden insta snapshot; tool params built by iterating fresh `HashMap`s — seeds erase to identical
+  bytes) + `identical_config_runs_send_byte_identical_prefixes_with_sorted_tools` (two real loop runs,
+  only registration order differs → name-sorted tools, byte-identical prefixes).
+  Notes: `assembly::{SystemBlocks, Assembler, CacheBust, canonical_tools, prefix_bytes}`.
+  SystemBlocks = name-sorted BTreeMap of named blocks (CLI prompt travels as the
+  "core" block — call order can never reorder the prefix); Assembler canonicalizes
+  each turn's request (tools name-sorted; registration order invisible) and
+  compares system-text + canonical tool JSON against the previous turn — a change
+  is `CacheBust { system_changed, tools_changed }`, surfaced as
+  `LoopEvent::CacheBust` (re-anchored per assembly: one change = one event;
+  history growth is never a bust). `prefix_bytes` = wire JSON — struct order over
+  serde_json's BTreeMap-backed maps (no `preserve_order` anywhere in the tree,
+  verified via `cargo tree`), no streaming flags. Headless prints cache-busts to
+  stderr. No volatile content added by assembly (E2E guard: request body must not
+  contain the workspace path or today's date). 10 new tests (8 core + 1 loop +
+  1 E2E guard); 267 total green, clippy/fmt clean. Known gap: the loop's
+  cache-bust *emission* branch is unreachable while registries are static (tools
+  can't change mid-run) — the detection logic is unit-tested on the Assembler;
+  MCP-era dynamic tools (stage 6) will exercise the emission path.
+  Risk: High · Depends: 1.9
 
 - [ ] **3.2 Token accounting** (1h) — `tiktoken-rs` for OpenAI-accurate counts + parse OpenRouter's
   response `usage` (prompt/completion tokens, **cached-token and cost fields** — confirm exact

@@ -1,0 +1,6 @@
+---
+source: crates/core/src/assembly.rs
+assertion_line: 279
+expression: bytes_one
+---
+{"model":"openai/gpt-4o-mini","messages":[{"role":"system","content":"You are iris."},{"role":"user","content":"do the thing"}],"tools":[{"type":"function","function":{"name":"list","description":"the list tool","parameters":{"properties":{},"type":"object"}}},{"type":"function","function":{"name":"read","description":"Read a file","parameters":{"alpha":{"type":"integer"},"middle":{"type":"boolean"},"zeta":{"type":"string"}}}},{"type":"function","function":{"name":"write","description":"the write tool","parameters":{"properties":{},"type":"object"}}}]}

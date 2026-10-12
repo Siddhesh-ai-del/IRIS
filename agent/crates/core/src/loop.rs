@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 
+use crate::assembly::{Assembler, CacheBust};
 use crate::config::Config;
 use crate::provider::{CompletionRequest, Provider, ProviderError, StreamAssembler, StreamEvent};
 use crate::session::schema::Outcome;
@@ -68,6 +69,13 @@ pub enum LoopEvent<'a> {
         id: &'a str,
         name: &'a str,
         result: &'a ToolResult,
+    },
+    /// The cacheable prefix (system text + tool schemas) changed since
+    /// the previous turn — any provider-side prompt cache for this
+    /// conversation is invalidated (stage 3.1).
+    CacheBust {
+        system_changed: bool,
+        tools_changed: bool,
     },
 }
 
@@ -199,6 +207,10 @@ where
     let mut messages = messages;
     let mut usage = Usage::default();
     let mut turns = 0u32;
+    // One assembler per run (stage 3.1): every turn goes out with
+    // canonical name-sorted tools, and a change of system text or tool
+    // schemas mid-conversation is surfaced as a cache-bust event.
+    let mut prompt = Assembler::new();
 
     loop {
         if turns >= opts.max_turns {
@@ -209,15 +221,24 @@ where
         }
         turns += 1;
 
-        let mut stream = provider
-            .complete_stream(CompletionRequest {
-                model: opts.model.clone(),
-                messages: messages.clone(),
-                tools: registry.specs(),
-                max_tokens: opts.max_tokens,
-                temperature: opts.temperature,
-            })
-            .await?;
+        let (request, bust) = prompt.assemble(CompletionRequest {
+            model: opts.model.clone(),
+            messages: messages.clone(),
+            tools: registry.specs(),
+            max_tokens: opts.max_tokens,
+            temperature: opts.temperature,
+        });
+        if let Some(CacheBust {
+            system_changed,
+            tools_changed,
+        }) = bust
+        {
+            observer(LoopEvent::CacheBust {
+                system_changed,
+                tools_changed,
+            });
+        }
+        let mut stream = provider.complete_stream(request).await?;
 
         let mut assembler = StreamAssembler::new();
         while let Some(event) = stream.next().await {

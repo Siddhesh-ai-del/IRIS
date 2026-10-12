@@ -27,6 +27,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use iris_core::agent_loop::{self, LoopEvent, LoopOptions, LoopOutcome, Recorded, RunError};
+use iris_core::assembly::SystemBlocks;
 use iris_core::config::{self, Config, ConfigInputs};
 use iris_core::provider::OpenAiClient;
 use iris_core::session;
@@ -106,8 +107,13 @@ pub fn run(
         eprintln!("[iris] error: cannot record session start: {err}");
         return EXIT_ERROR;
     }
+    // The system prompt travels as a named block (stage 3.1) so later
+    // stages can add blocks without ever reordering the prefix.
     let messages = vec![
-        Message::text(Role::System, SYSTEM_PROMPT),
+        SystemBlocks::new()
+            .with_block("core", SYSTEM_PROMPT)
+            .message()
+            .expect("the core system block is always present"),
         Message::text(Role::User, prompt),
     ];
     for message in &messages {
@@ -210,6 +216,19 @@ pub(crate) fn execute(
                 } else {
                     eprintln!("[iris] {name} ({id}) ok: {preview}");
                 }
+            }
+            LoopEvent::CacheBust {
+                system_changed,
+                tools_changed,
+            } => {
+                let what = match (system_changed, tools_changed) {
+                    (true, true) => "system + tools",
+                    (true, false) => "system prompt",
+                    (false, true) => "tool schemas",
+                    // Never emitted: a bust always changes something.
+                    (false, false) => "prefix",
+                };
+                eprintln!("[iris] cache-bust: {what} changed — prompt cache invalidated");
             }
         },
         |recorded| {

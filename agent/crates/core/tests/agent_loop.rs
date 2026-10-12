@@ -25,7 +25,7 @@ use iris_core::provider::{
 };
 use iris_core::session::writer::WriterError;
 use iris_core::tools::{
-    Decision, DenyOnAsk, ListTool, ReadTool, Tool, ToolContext, ToolError, ToolRegistry,
+    Decision, DenyOnAsk, ListTool, ReadTool, Tool, ToolContext, ToolError, ToolRegistry, WriteTool,
 };
 use iris_core::types::{ContentBlock, Message, Role, StopReason, ToolCall, ToolResult, Usage};
 
@@ -467,6 +467,10 @@ async fn observer_sees_streamed_text_and_tool_lifecycle() {
             LoopEvent::ToolEnd { id, name, result } => {
                 format!("end:{name}:{id}:{}", result.is_error)
             }
+            // Static run — system and tools never change, so this arm
+            // must never contribute a line (the final equality proves
+            // it if it ever does).
+            LoopEvent::CacheBust { .. } => "cache-bust".to_string(),
         };
         sink.lock().unwrap().push(line);
     };
@@ -768,5 +772,79 @@ async fn run_recorded_aborts_on_the_first_recorder_failure() {
         scripted.requests().len(),
         1,
         "no provider call after the transcript failed"
+    );
+}
+
+// --- prefix-invariant assembly (stage 3.1) -------------------------------
+
+/// The stage's Done-when, through the real loop: two runs with the same
+/// session and config — the only difference being tool *registration*
+/// order, the volatile input a HashMap-seeded builder would introduce —
+/// must send name-sorted tools and byte-identical request prefixes.
+#[tokio::test]
+async fn identical_config_runs_send_byte_identical_prefixes_with_sorted_tools() {
+    fn registry_in(order: [&'static str; 3]) -> ToolRegistry {
+        let mut registry = ToolRegistry::new();
+        for name in order {
+            match name {
+                "read_file" => registry.register(ReadTool),
+                "list_dir" => registry.register(ListTool),
+                "write_file" => registry.register(WriteTool),
+                other => panic!("unknown fixture tool: {other}"),
+            }
+        }
+        registry
+    }
+
+    let messages = || {
+        vec![
+            Message::text(Role::System, "You are iris."),
+            Message::text(Role::User, "say done"),
+        ]
+    };
+    let ctx = ToolContext::new("/tmp/iris-prefix-ws");
+
+    let first = Scripted::new(vec![text_response("done.", 7)]);
+    run(
+        &first,
+        &registry_in(["read_file", "list_dir", "write_file"]),
+        &ctx,
+        &DenyOnAsk,
+        &options(2, 1_000),
+        messages(),
+        no_observer,
+    )
+    .await
+    .expect("first run");
+
+    let second = Scripted::new(vec![text_response("done.", 7)]);
+    run(
+        &second,
+        &registry_in(["write_file", "read_file", "list_dir"]),
+        &ctx,
+        &DenyOnAsk,
+        &options(2, 1_000),
+        messages(),
+        no_observer,
+    )
+    .await
+    .expect("second run");
+
+    let request_one = &first.requests()[0];
+    let request_two = &second.requests()[0];
+    let names: Vec<&str> = request_one
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["list_dir", "read_file", "write_file"],
+        "tools reach the provider name-sorted, never registration-ordered"
+    );
+    assert_eq!(
+        iris_core::assembly::prefix_bytes(request_one),
+        iris_core::assembly::prefix_bytes(request_two),
+        "same session + same config ⇒ byte-identical request prefix"
     );
 }

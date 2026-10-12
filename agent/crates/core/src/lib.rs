@@ -4,6 +4,7 @@
 /// Library version, mirroring the workspace package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod assembly;
 pub mod config;
 pub mod provider;
 pub mod session;

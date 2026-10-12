@@ -338,3 +338,51 @@ fn run_missing_workdir_exits_one() {
     assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
     assert!(stderr.contains("workdir"), "{stderr}");
 }
+
+/// Stage 3.1 — no volatile content in the request body. The only mock
+/// that will answer refuses bodies containing the workspace path or
+/// today's date, so a prefix that leaks either (a) fails every match,
+/// (b) 404s, (c) exits 1 — while a clean body streams normally.
+#[test]
+fn request_body_excludes_workspace_path_and_dates() {
+    let dir = tempfile::tempdir().expect("temp workdir");
+    let canonical = std::fs::canonicalize(dir.path()).unwrap();
+    let workspace = canonical.to_string_lossy().into_owned();
+    let today = time::OffsetDateTime::now_utc().date();
+    let today = format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
+    );
+
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .body_excludes(workspace.as_str())
+            .body_excludes(today.as_str());
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body(&text_delta("Clean prefix."), "stop", (3, 1, 4)));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("say hello")
+        .arg("--workdir")
+        .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the volatile-free body must match: {stderr}"
+    );
+    assert_eq!(reply.calls(), 1);
+}
