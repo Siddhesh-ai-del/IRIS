@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 3.2 (token accounting — tiktoken-rs + OpenRouter usage fields)
-- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.2
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13)
+- **Next action:** Stage 3.3 (metrics collector — per-turn ttft/tokens-per-sec/cache-hit/cost)
+- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.3
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -427,11 +427,23 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   MCP-era dynamic tools (stage 6) will exercise the emission path.
   Risk: High · Depends: 1.9
 
-- [ ] **3.2 Token accounting** (1h) — `tiktoken-rs` for OpenAI-accurate counts + parse OpenRouter's
+- [x] **3.2 Token accounting** (1h) — `tiktoken-rs` for OpenAI-accurate counts + parse OpenRouter's
   response `usage` (prompt/completion tokens, **cached-token and cost fields** — confirm exact
   field names against openrouter.ai/docs during this stage; caching depends on provider support
   per OpenRouter's sticky-routing prompt-caching guide);
   reconcile estimated vs actual, record delta. Risk: Medium · Depends: 1.3, 3.1
+  — **Done (2026-10-13):** OpenRouter field names confirmed against openrouter.ai/docs:
+  `usage.cost` (USD, float) and `usage.prompt_tokens_details.cached_tokens` (cache reads; absent
+  for providers that don't report caching). New `iris_core::tokens` counts with `tiktoken-rs`
+  cl100k_base over `assembly::prefix_bytes` (3.1's canonical prefix) and reconciles
+  actual − estimate; the loop records the signed delta as the optional `input_token_delta` on
+  usage events and `Usage` gains optional `cached_input_tokens` / `cost_usd` (additive within
+  schema v0 — old lines still decode, absent fields keep the exact pre-3.2 shape, so
+  `docs/transcript-schema.md` updated per D5). The loop's lifetime totals now accumulate via
+  `Usage::plus`; the stage-2.4 index fills its reserved `cost_usd` column from the per-turn
+  usage events, so `sessions list` prints real cost (4 dp) instead of `-`. TDD: RED = 9 failures
+  (4 tokens stubs, wire/stream mapping, loop delta, index cost, CLI E2E) + 3 shape guards;
+  279 total green, clippy/fmt clean. Note: `Usage`/`LoopOutcome` dropped `Eq` (cost is f64).
 
 - [ ] **3.3 Metrics collector** (1h) — `crates/core/src/metrics.rs`: per-turn `ttft_ms`,
   `tokens_per_sec`, `cache_hit_pct`, `cost_usd` from a pluggable price table (config, not

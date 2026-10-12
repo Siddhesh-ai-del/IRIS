@@ -12,7 +12,7 @@
 
 mod common;
 
-use common::{iris, sse_body, text_delta, tool_delta};
+use common::{iris, sse_body, sse_body_with_usage, text_delta, tool_delta};
 use httpmock::prelude::*;
 use iris_core::session::schema::{Event, Outcome};
 use iris_core::session::writer::load;
@@ -385,4 +385,94 @@ fn request_body_excludes_workspace_path_and_dates() {
         "the volatile-free body must match: {stderr}"
     );
     assert_eq!(reply.calls(), 1);
+}
+
+/// Stage 3.2 — OpenRouter's accounting travels end to end: the usage
+/// chunk's cached tokens and USD charge land in the transcript's usage
+/// event (alongside the estimate reconciliation), and `sessions list`
+/// sums the charge into the cost column that used to be stuck on `-`.
+#[test]
+fn openrouter_accounting_reaches_the_transcript_and_the_listing() {
+    let dir = tempfile::tempdir().expect("temp workdir");
+
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body_with_usage(
+                &text_delta("All accounted for."),
+                "stop",
+                &json!({
+                    "prompt_tokens": 194,
+                    "completion_tokens": 2,
+                    "total_tokens": 196,
+                    "cost": 0.0042,
+                    "prompt_tokens_details": {"cached_tokens": 64}
+                }),
+            ));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("account me")
+        .arg("--workdir")
+        .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    reply.assert();
+
+    // The transcript's usage event carries the full accounting plus
+    // the estimated-vs-actual reconciliation.
+    let store = dir.path().join("sessions");
+    let transcript = std::fs::read_dir(&store)
+        .expect("sessions store")
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+        .expect("a transcript");
+    let events = load(&transcript.path()).expect("parseable transcript");
+    let usage_events: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Usage {
+                usage,
+                input_token_delta,
+                ..
+            } => Some((usage, input_token_delta)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(usage_events.len(), 1, "one response, one usage event");
+    let (usage, delta) = usage_events[0];
+    assert_eq!(usage.cached_input_tokens, Some(64), "prompt cache reads");
+    assert_eq!(usage.cost_usd, Some(0.0042), "the charge, in USD");
+    assert!(
+        delta.is_some(),
+        "the estimate reconciliation must be recorded with the usage"
+    );
+
+    // `sessions list` sums the charge into the cost column (4 dp).
+    let listed = iris()
+        .arg("sessions")
+        .arg("list")
+        .env("IRIS_SESSIONS_DIR", &store)
+        .output()
+        .expect("sessions list must run");
+    assert_eq!(
+        listed.status.code(),
+        Some(0),
+        "stdout: {}",
+        String::from_utf8_lossy(&listed.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        stdout.trim_end().ends_with("\t0.0042"),
+        "cost column must show the summed charge to 4 dp, got: {stdout}"
+    );
 }

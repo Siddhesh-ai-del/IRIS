@@ -106,6 +106,7 @@ fn text_response(text: &str, total_tokens: u64) -> CompletionResponse {
             input_tokens: total_tokens - 2,
             output_tokens: 2,
             total_tokens,
+            ..Usage::default()
         },
     }
 }
@@ -125,6 +126,7 @@ fn tool_response(id: &str, name: &str, input: Value) -> CompletionResponse {
             input_tokens: 10,
             output_tokens: 5,
             total_tokens: 15,
+            ..Usage::default()
         },
     }
 }
@@ -704,14 +706,20 @@ async fn run_recorded_mirrors_the_conversation_in_transcript_order() {
     };
     assert_eq!(role_of(&recorded[0]), Role::Assistant);
     assert!(
-        matches!(&recorded[1], Recorded::Usage { turn: 1, usage } if usage.total_tokens == 15),
+        matches!(
+            &recorded[1],
+            Recorded::Usage { turn: 1, usage, .. } if usage.total_tokens == 15
+        ),
         "turn 1 usage, got {:?}",
         recorded[1]
     );
     assert_eq!(role_of(&recorded[2]), Role::Tool);
     assert_eq!(role_of(&recorded[3]), Role::Assistant);
     assert!(
-        matches!(&recorded[4], Recorded::Usage { turn: 2, usage } if usage.total_tokens == 7),
+        matches!(
+            &recorded[4],
+            Recorded::Usage { turn: 2, usage, .. } if usage.total_tokens == 7
+        ),
         "turn 2 usage, got {:?}",
         recorded[4]
     );
@@ -847,4 +855,84 @@ async fn identical_config_runs_send_byte_identical_prefixes_with_sorted_tools() 
         iris_core::assembly::prefix_bytes(request_two),
         "same session + same config ⇒ byte-identical request prefix"
     );
+}
+
+// --- token accounting (stage 3.2) -----------------------------------------
+
+/// The loop reconciles its tiktoken estimate of the request prefix
+/// against the provider's actual input tokens and hands the signed
+/// delta to the recorder with every usage event — and hands `None`
+/// when the provider reported no usage (nothing to reconcile against).
+#[tokio::test]
+async fn records_the_reconciliation_delta_on_every_usage_event() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let tool_turn = CompletionResponse {
+        message: Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse(ToolCall {
+                id: "c1".into(),
+                name: "touch_marker".into(),
+                input: json!({}),
+            })],
+        },
+        stop_reason: StopReason::ToolUse,
+        usage: Usage {
+            input_tokens: 1234,
+            output_tokens: 5,
+            total_tokens: 1239,
+            ..Usage::default()
+        },
+    };
+    // Turn 2: a provider that reports no usage at all.
+    let silent_turn = CompletionResponse {
+        message: Message::text(Role::Assistant, "all done"),
+        stop_reason: StopReason::EndTurn,
+        usage: Usage::default(),
+    };
+    let scripted = Scripted::new(vec![tool_turn, silent_turn]);
+    let registry = marker_registry(&fired);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+
+    let mut deltas: Vec<Option<i64>> = Vec::new();
+    let outcome = run_recorded(
+        &scripted,
+        &registry,
+        &ctx,
+        &DenyOnAsk,
+        &options(5, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+        |recorded| {
+            if let Recorded::Usage {
+                input_token_delta, ..
+            } = recorded
+            {
+                deltas.push(input_token_delta);
+            }
+            Ok(())
+        },
+    )
+    .await
+    .expect("loop must run");
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    assert_eq!(deltas.len(), 2, "one usage event per provider response");
+    let estimated = iris_core::tokens::estimate_input(&scripted.requests()[0]);
+    assert_eq!(
+        deltas[0],
+        Some(1234 - estimated as i64),
+        "delta = actual input tokens − the tiktoken estimate of the prefix"
+    );
+    assert_eq!(deltas[1], None, "no usage reported → nothing to reconcile");
+    match outcome {
+        LoopOutcome::Completed { usage, .. } => {
+            assert_eq!(
+                usage.input_tokens, 1234,
+                "lifetime totals only sum what the provider reported"
+            );
+        }
+        other => panic!("expected Completed, got {other:?}"),
+    }
 }

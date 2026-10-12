@@ -287,7 +287,9 @@ mod tests {
                     input_tokens: 120,
                     output_tokens: 34,
                     total_tokens: 154,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             },
             Event::SessionEnd {
                 outcome: Outcome::Completed,
@@ -296,6 +298,7 @@ mod tests {
                     input_tokens: 120,
                     output_tokens: 34,
                     total_tokens: 154,
+                    ..Usage::default()
                 },
                 ended_at: ts(),
             },
@@ -465,7 +468,9 @@ mod tests {
                     input_tokens: (i as u64) * 10,
                     output_tokens: 1,
                     total_tokens: (i as u64) * 10 + 1,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             });
         }
 

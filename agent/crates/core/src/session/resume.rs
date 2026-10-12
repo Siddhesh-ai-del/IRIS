@@ -166,6 +166,7 @@ mod tests {
             Event::Usage {
                 turn: 1,
                 usage: Usage::default(),
+                input_token_delta: None,
             },
         ];
         let err = rehydrate(&events).unwrap_err();
@@ -189,7 +190,9 @@ mod tests {
                     input_tokens: 10,
                     output_tokens: 5,
                     total_tokens: 15,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             },
             Event::Message(tool_result("call_1", "[package]")),
             Event::Usage {
@@ -198,7 +201,9 @@ mod tests {
                     input_tokens: 20,
                     output_tokens: 3,
                     total_tokens: 23,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             },
             Event::Message(Message::text(Role::Assistant, "Done.")),
             Event::SessionEnd {
@@ -208,6 +213,7 @@ mod tests {
                     input_tokens: 30,
                     output_tokens: 8,
                     total_tokens: 38,
+                    ..Usage::default()
                 },
                 ended_at: ts(),
             },
@@ -247,7 +253,9 @@ mod tests {
                     input_tokens: 10,
                     output_tokens: 5,
                     total_tokens: 15,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             },
         ];
         let messages = rehydrate(&events).unwrap();

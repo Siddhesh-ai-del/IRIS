@@ -277,6 +277,20 @@ pub struct WireUsage {
     pub completion_tokens: u64,
     #[serde(default)]
     pub total_tokens: u64,
+    /// OpenRouter's charge for this response in USD (stage 3.2).
+    #[serde(default)]
+    pub cost: Option<f64>,
+    /// OpenRouter's per-category token details (stage 3.2).
+    #[serde(default)]
+    pub prompt_tokens_details: Option<WirePromptTokensDetails>,
+}
+
+/// `usage.prompt_tokens_details` — the cache accounting (stage 3.2).
+#[derive(Debug, Default, Deserialize)]
+pub struct WirePromptTokensDetails {
+    /// Input tokens read from the provider's prompt cache.
+    #[serde(default)]
+    pub cached_tokens: u64,
 }
 
 /// OpenAI wire response → domain completion.
@@ -365,6 +379,10 @@ pub(crate) fn usage_from_wire(usage: Option<WireUsage>) -> Usage {
             input_tokens: wire.prompt_tokens,
             output_tokens: wire.completion_tokens,
             total_tokens: wire.total_tokens,
+            cached_input_tokens: wire
+                .prompt_tokens_details
+                .map(|details| details.cached_tokens),
+            cost_usd: wire.cost,
         },
         None => Usage::default(),
     }
@@ -533,9 +551,47 @@ mod tests {
             Usage {
                 input_tokens: 12,
                 output_tokens: 4,
-                total_tokens: 16
+                total_tokens: 16,
+                ..Usage::default()
             }
         );
+    }
+
+    /// Stage 3.2: OpenRouter's usage carries the cache read count and
+    /// the USD charge alongside the token counters (field names
+    /// confirmed against openrouter.ai/docs — usage accounting page).
+    #[test]
+    fn usage_parses_cached_tokens_and_cost_from_openrouter() {
+        let wire: WireUsage = serde_json::from_value(json!({
+            "prompt_tokens": 194,
+            "completion_tokens": 2,
+            "total_tokens": 196,
+            "cost": 0.0042,
+            "prompt_tokens_details": {"cached_tokens": 64, "cache_write_tokens": 100}
+        }))
+        .unwrap();
+        let usage = usage_from_wire(Some(wire));
+        assert_eq!(usage.input_tokens, 194);
+        assert_eq!(usage.cached_input_tokens, Some(64), "cache reads");
+        assert_eq!(usage.cost_usd, Some(0.0042), "the charge, in USD");
+    }
+
+    /// Plain OpenAI-style usage (no extras) stays exactly as before —
+    /// pre-3.2 transcripts and providers without accounting keep
+    /// working, extras read `None`.
+    #[test]
+    fn plain_usage_without_extras_stays_compatible() {
+        let wire: WireUsage = serde_json::from_value(json!({
+            "prompt_tokens": 12,
+            "completion_tokens": 4,
+            "total_tokens": 16
+        }))
+        .unwrap();
+        let usage = usage_from_wire(Some(wire));
+        assert_eq!(usage.cached_input_tokens, None);
+        assert_eq!(usage.cost_usd, None);
+        let none = usage_from_wire(None);
+        assert_eq!(none, Usage::default());
     }
 
     #[test]

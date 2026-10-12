@@ -61,7 +61,16 @@ pub enum Event {
     /// assistant (incl. tool_use) and tool (tool_result) messages.
     Message(Message),
     /// Token accounting for one provider response, in arrival order.
-    Usage { turn: u32, usage: Usage },
+    Usage {
+        turn: u32,
+        usage: Usage,
+        /// Reconciliation (stage 3.2): the provider's actual
+        /// `input_tokens` minus our tiktoken estimate of the request
+        /// prefix. Absent when the provider reported no usage — there
+        /// is nothing to reconcile against.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_token_delta: Option<i64>,
+    },
     /// Last line of a cleanly finished transcript. Its **absence**
     /// means the run was interrupted (crash, kill, provider error) —
     /// readers must not treat a missing `session_end` as corruption.
@@ -265,10 +274,15 @@ mod tests {
             input_tokens: 120,
             output_tokens: 34,
             total_tokens: 154,
+            ..Usage::default()
         };
-        let line = Envelope::new(Event::Usage { turn: 1, usage })
-            .to_line()
-            .unwrap();
+        let line = Envelope::new(Event::Usage {
+            turn: 1,
+            usage,
+            input_token_delta: None,
+        })
+        .to_line()
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(
             value,
@@ -277,6 +291,79 @@ mod tests {
                 "type": "usage",
                 "turn": 1,
                 "usage": {"input_tokens": 120, "output_tokens": 34, "total_tokens": 154}
+            })
+        );
+    }
+
+    /// Stage 3.2 — the reconciliation delta rides on the usage event,
+    /// and provider accounting (cached tokens, USD cost) rides inside
+    /// the usage object. Absent values keep the exact pre-3.2 shape.
+    #[test]
+    fn usage_event_records_accounting_and_the_reconciliation_delta() {
+        let line = Envelope::new(Event::Usage {
+            turn: 2,
+            usage: Usage {
+                input_tokens: 194,
+                output_tokens: 2,
+                total_tokens: 196,
+                cached_input_tokens: Some(64),
+                cost_usd: Some(0.0042),
+            },
+            input_token_delta: Some(17),
+        })
+        .to_line()
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "v": 0,
+                "type": "usage",
+                "turn": 2,
+                "usage": {
+                    "input_tokens": 194,
+                    "output_tokens": 2,
+                    "total_tokens": 196,
+                    "cached_input_tokens": 64,
+                    "cost_usd": 0.0042
+                },
+                "input_token_delta": 17
+            })
+        );
+        assert_eq!(
+            Envelope::from_line(&line).unwrap(),
+            Envelope::new(Event::Usage {
+                turn: 2,
+                usage: Usage {
+                    input_tokens: 194,
+                    output_tokens: 2,
+                    total_tokens: 196,
+                    cached_input_tokens: Some(64),
+                    cost_usd: Some(0.0042),
+                },
+                input_token_delta: Some(17),
+            }),
+            "round trip preserves accounting and delta"
+        );
+    }
+
+    /// A line written by a pre-3.2 build — three counters, no delta —
+    /// must still decode: old transcripts are resume material, not
+    /// museum pieces.
+    #[test]
+    fn pre_accounting_usage_lines_still_decode() {
+        let old = r#"{"v":0,"type":"usage","turn":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154}}"#;
+        assert_eq!(
+            Envelope::from_line(old).unwrap(),
+            Envelope::new(Event::Usage {
+                turn: 1,
+                usage: Usage {
+                    input_tokens: 120,
+                    output_tokens: 34,
+                    total_tokens: 154,
+                    ..Usage::default()
+                },
+                input_token_delta: None,
             })
         );
     }
@@ -290,6 +377,7 @@ mod tests {
                 input_tokens: 300,
                 output_tokens: 60,
                 total_tokens: 360,
+                ..Usage::default()
             },
             ended_at: ts(),
         })
@@ -320,7 +408,9 @@ mod tests {
                     input_tokens: 10,
                     output_tokens: 5,
                     total_tokens: 15,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             },
             Event::SessionEnd {
                 outcome: Outcome::MaxTurns,
@@ -417,6 +507,7 @@ mod tests {
             Event::Usage {
                 turn: 1,
                 usage: Usage::default(),
+                input_token_delta: None,
             },
             Event::SessionEnd {
                 outcome: Outcome::Completed,
@@ -489,7 +580,9 @@ mod tests {
                     input_tokens: 120,
                     output_tokens: 34,
                     total_tokens: 154,
+                    ..Usage::default()
                 },
+                input_token_delta: None,
             }),
             Envelope::new(Event::SessionEnd {
                 outcome: Outcome::Completed,
@@ -498,6 +591,7 @@ mod tests {
                     input_tokens: 120,
                     output_tokens: 34,
                     total_tokens: 154,
+                    ..Usage::default()
                 },
                 ended_at: ts(),
             }),

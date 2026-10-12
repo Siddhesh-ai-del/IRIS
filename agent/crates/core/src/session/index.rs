@@ -8,8 +8,9 @@
 //!   any transcript whose mtime changed, prunes rows whose transcript is
 //!   gone, and a deleted `index.db` rebuilds from scratch), so the index
 //!   can always be thrown away.
-//! - **Cost stays `NULL` until stage 3.2** records it — the column
-//!   exists now so the list format never has to change.
+//! - **Cost is `NULL` unless a transcript reports one** — summed from
+//!   the per-turn `usage` events since stage 3.2 (providers that never
+//!   report a charge keep `NULL`, so the list shows `-`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ use time::OffsetDateTime;
 
 use crate::session::schema::Event;
 use crate::session::writer::{Manifest, load, load_manifest};
+use crate::types::sum_reported;
 
 /// The index file inside the sessions directory.
 pub const INDEX_FILE: &str = "index.db";
@@ -78,7 +80,8 @@ pub struct SessionRow {
     pub output_tokens: u64,
     /// Sum of `total_tokens` across every `usage` event.
     pub total_tokens: u64,
-    /// Session cost in USD — `None` until stage 3.2 records it.
+    /// Session cost in USD — `None` when no usage event reported a
+    /// charge (summed from the transcript since stage 3.2).
     pub cost_usd: Option<f64>,
 }
 
@@ -193,7 +196,7 @@ impl SessionIndex {
         self.conn.execute(
             "INSERT INTO sessions (session_id, cwd, model, started_at_ns, last_active_ns,
                                    turns, input_tokens, output_tokens, total_tokens, cost_usd)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(session_id) DO UPDATE SET
                  cwd = excluded.cwd,
                  model = excluded.model,
@@ -214,6 +217,7 @@ impl SessionIndex {
                 derived.input_tokens as i64,
                 derived.output_tokens as i64,
                 derived.total_tokens as i64,
+                derived.cost_usd,
             ],
         )?;
         Ok(true)
@@ -247,6 +251,7 @@ struct Derived {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
+    cost_usd: Option<f64>,
 }
 
 impl Derived {
@@ -262,15 +267,16 @@ impl Derived {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            cost_usd: None,
         }
     }
 }
 
 /// Aggregate a transcript: static fields from the mandatory
-/// `session_start`, one turn and its tokens per `usage` event (a
-/// session's lifetime across resumed runs). `None` unless the
-/// transcript opens with `session_start` — anything else is not an
-/// IRIS transcript and must fall back to the manifest.
+/// `session_start`, one turn and its tokens (plus reported cost) per
+/// `usage` event (a session's lifetime across resumed runs). `None`
+/// unless the transcript opens with `session_start` — anything else is
+/// not an IRIS transcript and must fall back to the manifest.
 fn derive(events: &[Event]) -> Option<Derived> {
     let Event::SessionStart {
         started_at,
@@ -289,6 +295,7 @@ fn derive(events: &[Event]) -> Option<Derived> {
         input_tokens: 0,
         output_tokens: 0,
         total_tokens: 0,
+        cost_usd: None,
     };
     for event in events {
         if let Event::Usage { usage, .. } = event {
@@ -296,6 +303,7 @@ fn derive(events: &[Event]) -> Option<Derived> {
             derived.input_tokens += usage.input_tokens;
             derived.output_tokens += usage.output_tokens;
             derived.total_tokens += usage.total_tokens;
+            derived.cost_usd = sum_reported(derived.cost_usd, usage.cost_usd);
         }
     }
     Some(derived)
@@ -337,6 +345,7 @@ mod tests {
             input_tokens: input,
             output_tokens: output,
             total_tokens: total,
+            ..Usage::default()
         }
     }
 
@@ -362,6 +371,7 @@ mod tests {
                 .append(&Event::Usage {
                     turn: (index + 1) as u32,
                     usage: usage(*tuple),
+                    input_token_delta: None,
                 })
                 .expect("usage line");
         }
@@ -409,10 +419,7 @@ mod tests {
             (now - a.last_active.unix_timestamp()).abs() < 300,
             "last active tracks the transcript's mtime"
         );
-        assert_eq!(
-            a.cost_usd, None,
-            "cost arrives with stage 3.2 — column reserved, value NULL"
-        );
+        assert_eq!(a.cost_usd, None, "no usage event reported a charge → NULL");
     }
 
     #[test]
@@ -450,6 +457,7 @@ mod tests {
             .append(&Event::Usage {
                 turn: 2,
                 usage: usage((20, 5, 25)),
+                input_token_delta: None,
             })
             .expect("append");
         drop(writer);
@@ -566,6 +574,59 @@ mod tests {
             .find(|row| row.session_id == "ses_ok")
             .expect("healthy row");
         assert_eq!((ok.turns, ok.total_tokens), (1, 10));
+    }
+
+    /// Stage 3.2 — the reserved `cost_usd` column is filled from the
+    /// per-turn usage events (OpenRouter's reported charge); a session
+    /// whose provider never reported a cost keeps `NULL`, so the list
+    /// keeps showing `-`.
+    #[test]
+    fn refresh_sums_reported_costs_into_the_row() {
+        let dir = tempfile::tempdir().expect("temp store");
+        for (id, costs) in [
+            ("ses_paid", vec![0.0025_f64, 0.0005]),
+            ("ses_unrated", Vec::new()),
+        ] {
+            let manifest = Manifest::new(id, "/w", "openai/gpt-4o-mini");
+            let mut writer = TranscriptWriter::create(dir.path(), &manifest).expect("create");
+            writer.append(&manifest.start_event()).expect("start");
+            for (index, cost) in costs.into_iter().enumerate() {
+                writer
+                    .append(&Event::Usage {
+                        turn: (index + 1) as u32,
+                        usage: Usage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            total_tokens: 15,
+                            cached_input_tokens: Some(4),
+                            cost_usd: Some(cost),
+                        },
+                        input_token_delta: None,
+                    })
+                    .expect("usage line");
+            }
+        }
+
+        let mut index = SessionIndex::open(dir.path()).expect("open index");
+        index.refresh(false).expect("refresh");
+        let rows = index.list().expect("list");
+        let paid = rows
+            .iter()
+            .find(|row| row.session_id == "ses_paid")
+            .expect("paid row");
+        assert_eq!(
+            paid.cost_usd,
+            Some(0.0025 + 0.0005),
+            "lifetime cost = sum of the per-turn charges"
+        );
+        let uncharged = rows
+            .iter()
+            .find(|row| row.session_id == "ses_unrated")
+            .expect("uncharged row");
+        assert_eq!(
+            uncharged.cost_usd, None,
+            "no usage event reported a cost → NULL"
+        );
     }
 
     #[test]

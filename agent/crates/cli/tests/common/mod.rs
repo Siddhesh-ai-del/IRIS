@@ -31,12 +31,25 @@ pub fn iris() -> Command {
 /// lines, a finish chunk, a usage chunk, then `[DONE]`.
 pub fn sse_body(delta_lines: &str, finish: &str, usage: (u64, u64, u64)) -> String {
     let (prompt, completion, total) = usage;
+    sse_body_with_usage(
+        delta_lines,
+        finish,
+        &json!({
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        }),
+    )
+}
+
+/// [`sse_body`] with an arbitrary (OpenRouter-style) usage object —
+/// cached tokens, cost, whatever the wire sends (stage 3.2).
+pub fn sse_body_with_usage(delta_lines: &str, finish: &str, usage: &Value) -> String {
     format!(
         "data: {{\"choices\":[{{\"delta\":{{\"role\":\"assistant\"}},\"finish_reason\":null}}]}}\n\n\
          {delta_lines}\
          data: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"{finish}\"}}]}}\n\n\
-         data: {{\"choices\":[],\"usage\":{{\"prompt_tokens\":{prompt},\
-         \"completion_tokens\":{completion},\"total_tokens\":{total}}}}}\n\n\
+         data: {{\"choices\":[],\"usage\":{usage}}}\n\n\
          data: [DONE]\n\n"
     )
 }

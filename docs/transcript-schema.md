@@ -72,10 +72,20 @@ order.
 | Field | Type | Notes |
 |---|---|---|
 | `turn` | integer | 1-based turn number within the run. |
-| `usage` | object | `input_tokens`, `output_tokens`, `total_tokens` (integers, cumulative across the run). |
+| `usage` | object | `input_tokens`, `output_tokens`, `total_tokens` (integers, cumulative across the run) plus the optional accounting below. |
+| `input_token_delta` | integer (optional) | Stage 3.2 reconciliation: the provider's actual `input_tokens` minus IRIS's tiktoken estimate of the request prefix. Positive = the provider counted more than the estimate; absent when the provider reported no usage (nothing to reconcile). |
+
+The `usage` object's optional fields (added within v0 — additive, absent on
+lines written before stage 3.2):
+
+| Field | Type | Notes |
+|---|---|---|
+| `cached_input_tokens` | integer (optional) | Input tokens read from the provider's prompt cache (OpenRouter `usage.prompt_tokens_details.cached_tokens`). Absent when the provider does not report caching. |
+| `cost_usd` | number (optional) | What the provider charged for this response, in USD (OpenRouter `usage.cost`). Absent when unreported. |
 
 ```json
 {"v":0,"type":"usage","turn":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154}}
+{"v":0,"type":"usage","turn":2,"usage":{"input_tokens":194,"output_tokens":2,"total_tokens":196,"cached_input_tokens":64,"cost_usd":0.0042},"input_token_delta":17}
 ```
 
 ### `session_end`
@@ -88,7 +98,7 @@ what tells you whether the most recent run finished.
 |---|---|---|
 | `outcome` | string | `completed` \| `max_turns` \| `budget_exceeded`. |
 | `turns` | integer | Provider calls made. |
-| `usage` | object | Cumulative totals (same shape as `usage`). |
+| `usage` | object | Cumulative totals (same shape as the `usage` event's object, including the optional `cached_input_tokens` / `cost_usd`). |
 | `ended_at` | string | RFC 3339 / UTC. |
 
 ```json

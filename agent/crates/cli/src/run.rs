@@ -234,7 +234,15 @@ pub(crate) fn execute(
         |recorded| {
             let appended = match recorded {
                 Recorded::Message(message) => writer.append(&Event::Message(message)),
-                Recorded::Usage { turn, usage } => writer.append(&Event::Usage { turn, usage }),
+                Recorded::Usage {
+                    turn,
+                    usage,
+                    input_token_delta,
+                } => writer.append(&Event::Usage {
+                    turn,
+                    usage,
+                    input_token_delta,
+                }),
             };
             Ok(appended?)
         },

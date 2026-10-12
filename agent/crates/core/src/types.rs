@@ -63,12 +63,56 @@ impl Message {
     }
 }
 
-/// Token accounting for one model response.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Token accounting for one model response — including what the
+/// provider charged for it (stage 3.2).
+///
+/// No `Eq`: `cost_usd` is a `f64` straight off the wire. All fields
+/// beyond the three counters are optional and skipped when absent, so
+/// usage lines written before stage 3.2 keep their exact v0 shape.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+    /// Input tokens served from the provider's prompt cache (OpenRouter
+    /// `usage.prompt_tokens_details.cached_tokens`). `None` when the
+    /// provider does not report caching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
+    /// What the provider charged for this response, in USD (OpenRouter
+    /// `usage.cost`). `None` when unreported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+impl Usage {
+    /// Accumulate one response into lifetime totals (stage 3.2):
+    /// counters add; the optional accounting extras add up what was
+    /// reported — `None` only when no response ever reported one.
+    pub fn plus(&self, other: &Usage) -> Usage {
+        Usage {
+            input_tokens: self.input_tokens + other.input_tokens,
+            output_tokens: self.output_tokens + other.output_tokens,
+            total_tokens: self.total_tokens + other.total_tokens,
+            cached_input_tokens: sum_reported(self.cached_input_tokens, other.cached_input_tokens),
+            cost_usd: sum_reported(self.cost_usd, other.cost_usd),
+        }
+    }
+}
+
+/// Sum an optional per-response figure across responses: `None` only
+/// when neither side reported anything (stage 3.2 — caching and cost
+/// are not universally reported).
+pub(crate) fn sum_reported<T: Copy + std::ops::Add<Output = T>>(
+    left: Option<T>,
+    right: Option<T>,
+) -> Option<T> {
+    match (left, right) {
+        (Some(a), Some(b)) => Some(a + b),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
 }
 
 /// Why the model stopped generating.
@@ -164,6 +208,7 @@ mod tests {
             input_tokens: 120,
             output_tokens: 34,
             total_tokens: 154,
+            ..Usage::default()
         };
         let json = serde_json::to_string(&usage).unwrap();
         let back: Usage = serde_json::from_str(&json).unwrap();

@@ -350,9 +350,26 @@ mod tests {
             Usage {
                 input_tokens: 3,
                 output_tokens: 2,
-                total_tokens: 5
+                total_tokens: 5,
+                ..Usage::default()
             }
         );
+    }
+
+    /// Stage 3.2 — the *streaming* path (the one `run -p` uses) must
+    /// carry OpenRouter's cached-token and cost fields through the
+    /// trailing usage chunk, not just the counters.
+    #[test]
+    fn usage_chunk_carries_cached_tokens_and_cost() {
+        let response = assemble(&[
+            r#"{"choices":[{"delta":{"role":"assistant","content":"hi"}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":194,"completion_tokens":2,"total_tokens":196,"cost":0.0042,"prompt_tokens_details":{"cached_tokens":64}}}"#,
+            "[DONE]",
+        ]);
+        assert_eq!(response.usage.input_tokens, 194);
+        assert_eq!(response.usage.cached_input_tokens, Some(64));
+        assert_eq!(response.usage.cost_usd, Some(0.0042));
     }
 
     #[test]

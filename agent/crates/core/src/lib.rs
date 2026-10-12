@@ -8,6 +8,7 @@ pub mod assembly;
 pub mod config;
 pub mod provider;
 pub mod session;
+pub mod tokens;
 pub mod tools;
 pub mod types;
 

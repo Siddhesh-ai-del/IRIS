@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::provider::{CompletionRequest, Provider, ProviderError, StreamAssembler, StreamEvent};
 use crate::session::schema::Outcome;
 use crate::session::writer::WriterError;
+use crate::tokens;
 use crate::tools::permissions::{AskResolver, Decision, Gate};
 use crate::tools::{ToolContext, ToolRegistry};
 use crate::types::{ContentBlock, Message, Role, ToolCall, ToolResult, Usage};
@@ -80,7 +81,10 @@ pub enum LoopEvent<'a> {
 }
 
 /// How a run ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why a run stopped.
+///
+/// Not `Eq`: its `usage` carries a `f64` cost (stage 3.2).
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoopOutcome {
     /// The model stopped without asking for tools.
     Completed {
@@ -105,8 +109,15 @@ pub enum LoopOutcome {
 pub enum Recorded {
     /// A message the loop just appended to the conversation.
     Message(Message),
-    /// Token accounting for the response of this (1-based) turn.
-    Usage { turn: u32, usage: Usage },
+    /// Token accounting for the response of this (1-based) turn, plus
+    /// the estimate reconciliation (stage 3.2): actual input tokens
+    /// minus our tiktoken estimate of the request prefix, `None` when
+    /// the provider reported no usage to reconcile against.
+    Usage {
+        turn: u32,
+        usage: Usage,
+        input_token_delta: Option<i64>,
+    },
 }
 
 /// Why a recording run stopped.
@@ -238,6 +249,9 @@ where
                 tools_changed,
             });
         }
+        // Stage 3.2: count the canonical prefix before it is sent, to
+        // reconcile against the provider's actual input tokens.
+        let estimated_input = tokens::estimate_input(&request);
         let mut stream = provider.complete_stream(request).await?;
 
         let mut assembler = StreamAssembler::new();
@@ -250,11 +264,7 @@ where
         }
         let response = assembler.finish()?;
 
-        usage = Usage {
-            input_tokens: usage.input_tokens + response.usage.input_tokens,
-            output_tokens: usage.output_tokens + response.usage.output_tokens,
-            total_tokens: usage.total_tokens + response.usage.total_tokens,
-        };
+        usage = usage.plus(&response.usage);
 
         let text = plain_text(&response.message);
         let calls: Vec<ToolCall> = response
@@ -271,6 +281,11 @@ where
         recorder(Recorded::Usage {
             turn: turns,
             usage: response.usage.clone(),
+            // Stage 3.2: actual input tokens − our tiktoken estimate of
+            // the request prefix; `None` when the provider reported no
+            // usage to reconcile against.
+            input_token_delta: (response.usage.input_tokens > 0)
+                .then(|| tokens::reconcile(estimated_input, response.usage.input_tokens)),
         })?;
 
         if calls.is_empty() {
