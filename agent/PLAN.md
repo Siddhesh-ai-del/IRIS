@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 3.4 (live gauge rendering, headless first — status line from `LoopEvent::Metrics`)
-- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.4
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14)
+- **Next action:** Stage 4.1 (extract `crates/tui` + app skeleton — ratatui/crossterm event loop)
+- **Current phase:** 3 — Cache-First Sessions ✅ complete (3.1–3.4); next: 4 — TUI
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -456,10 +456,16 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   test + realistic-transcript snapshot updated per D5). `Config` dropped `Eq` (f64 rates).
   289 total green, clippy/fmt clean.
 
-- [ ] **3.4 Live gauge rendering (headless first)** (1h) — status line in `run -p` and interactive
+- [x] **3.4 Live gauge rendering (headless first)** (1h) — status line in `run -p` and interactive
   console mode; validate numbers **before** any TUI work.
   **Done when:** against the `httpmock` fixture with cache usage, gauge prints expected hit % and
   cost to 4 dp. Risk: Low · Depends: 3.3
+  **Done (2026-10-14):** `crates/cli/src/gauge.rs::format_turn` — one `[iris] turn N · ttft … ·
+  … tok/s · cache …% · cost $…` line per `LoopEvent::Metrics` on stderr (stdout stays the
+  model's, pipeable), wired in `run::execute` so `run -p` **and** `sessions resume` both print
+  it; unreported fields render `–` (never fake zeroes). Interactive chat (4.x) and the TUI status
+  bar (4.4) consume the same `TurnMetrics`. 293 total green, clippy/fmt clean.
+  **Phase 3 closed.**
 
 ### Phase 4 — TUI (6 stages, ~7h)
 

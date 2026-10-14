@@ -2,6 +2,7 @@
 //! (stage 0.2 defines the surface; execution semantics land in stages 1.10+).
 
 mod doctor;
+mod gauge;
 mod run;
 mod sessions;
 

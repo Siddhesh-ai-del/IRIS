@@ -559,3 +559,58 @@ fn price_table_costs_land_in_turn_metrics_events() {
         "130×0.15 + 64×0.075 + 2×0.60 per million, got {cost}"
     );
 }
+
+/// Stage 3.4 (Done-when) — against the `httpmock` fixture with cache
+/// usage, the live gauge prints the turn's expected hit % and its cost
+/// to 4 dp. ttft and tok/s are timing-dependent, so the line is found
+/// by prefix and pinned from `cache` onward.
+#[test]
+fn live_gauge_prints_expected_hit_percent_and_cost_to_4dp() {
+    let dir = tempfile::tempdir().expect("temp workdir");
+
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body_with_usage(
+                &text_delta("Gauged."),
+                "stop",
+                &json!({
+                    "prompt_tokens": 194,
+                    "completion_tokens": 2,
+                    "total_tokens": 196,
+                    "prompt_tokens_details": {"cached_tokens": 64},
+                    "cost": 0.0042
+                }),
+            ));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("gauge me")
+        .arg("--workdir")
+        .arg(dir.path())
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    reply.assert();
+
+    let gauge = stderr
+        .lines()
+        .find(|line| line.starts_with("[iris] turn 1"))
+        .unwrap_or_else(|| panic!("the gauge status line must print, stderr: {stderr}"));
+    assert!(
+        gauge.contains("ttft ") && gauge.contains("tok/s"),
+        "live timings ride the line: {gauge}"
+    );
+    assert!(
+        gauge.ends_with("· cache 32.99% · cost $0.0042"),
+        "expected hit % and cost to 4 dp: {gauge}"
+    );
+}

@@ -1,8 +1,9 @@
 //! `iris run -p …` — the headless one-shot runner (stage 1.10).
 //!
 //! Runs one prompt through the agent loop with **no TUI**: model text
-//! streams to **stdout** (pipeable), tool events and the run summary go
-//! to **stderr**. The process exit code *is* the agent outcome, so CI
+//! streams to **stdout** (pipeable), tool events, the per-turn gauge
+//! (stage 3.4: ttft / tok/s / cache hit % / cost) and the run summary
+//! go to **stderr**. The process exit code *is* the agent outcome, so CI
 //! can branch on it:
 //!
 //! | code | meaning                                  |
@@ -38,6 +39,8 @@ use iris_core::tools::{
     WriteTool,
 };
 use iris_core::types::{Message, Role};
+
+use crate::gauge;
 
 /// The model finished on its own.
 pub const EXIT_COMPLETED: i32 = 0;
@@ -230,9 +233,12 @@ pub(crate) fn execute(
                 };
                 eprintln!("[iris] cache-bust: {what} changed — prompt cache invalidated");
             }
-            // Stage 3.4 renders the live gauge from these; headless 3.3
-            // records them to the transcript only (via the recorder).
-            LoopEvent::Metrics(_) => {}
+            // Stage 3.4: the live gauge — one status line per turn on
+            // stderr (stdout stays the model's, pipeable); the stage-4
+            // TUI renders the same TurnMetrics over channels.
+            LoopEvent::Metrics(metrics) => {
+                eprintln!("{}", gauge::format_turn(&metrics));
+            }
         },
         |recorded| {
             let appended = match recorded {
