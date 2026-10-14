@@ -6,6 +6,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod assembly;
 pub mod config;
+pub mod metrics;
 pub mod provider;
 pub mod session;
 pub mod tokens;

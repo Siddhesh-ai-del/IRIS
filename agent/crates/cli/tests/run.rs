@@ -476,3 +476,86 @@ fn openrouter_accounting_reaches_the_transcript_and_the_listing() {
         "cost column must show the summed charge to 4 dp, got: {stdout}"
     );
 }
+
+/// Stage 3.3 — the config price table reaches the transcript end to
+/// end: a run priced *only* by `[pricing."<model>"]` in the config
+/// file records a `turn_metrics` event with ttft, cache hit % and the
+/// table's estimated cost (the fixture reports cache reads but no
+/// charge, so the estimate is the only possible source).
+#[test]
+fn price_table_costs_land_in_turn_metrics_events() {
+    let dir = tempfile::tempdir().expect("temp workdir");
+    let config = dir.path().join("iris-config.toml");
+    std::fs::write(
+        &config,
+        "[pricing.\"openai/gpt-4o-mini\"]\n\
+         input_per_million = 0.15\n\
+         output_per_million = 0.60\n\
+         cached_input_per_million = 0.075\n",
+    )
+    .expect("write config file");
+
+    let server = MockServer::start();
+    let reply = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(sse_body_with_usage(
+                &text_delta("Measured."),
+                "stop",
+                &json!({
+                    "prompt_tokens": 194,
+                    "completion_tokens": 2,
+                    "total_tokens": 196,
+                    "prompt_tokens_details": {"cached_tokens": 64}
+                }),
+            ));
+    });
+
+    let out = iris()
+        .arg("run")
+        .arg("-p")
+        .arg("measure me")
+        .arg("--workdir")
+        .arg(dir.path())
+        .env("IRIS_CONFIG", &config)
+        .env("IRIS_SESSIONS_DIR", dir.path().join("sessions"))
+        .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
+        .env("IRIS_PROVIDER_BASE_URL", server.base_url())
+        .output()
+        .expect("iris binary must run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    reply.assert();
+
+    let store = dir.path().join("sessions");
+    let transcript = std::fs::read_dir(&store)
+        .expect("sessions store")
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+        .expect("a transcript");
+    let events = load(&transcript.path()).expect("parseable transcript");
+    let metrics: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::TurnMetrics(metrics) => Some(metrics),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(metrics.len(), 1, "one response, one turn_metrics event");
+    let metrics = metrics[0];
+    assert_eq!(metrics.turn, 1, "same turn as the usage event");
+    assert!(metrics.ttft_ms.is_some(), "a token did arrive");
+    let hit = metrics.cache_hit_pct.expect("fixture reports cache reads");
+    assert!(
+        (hit - 64.0 * 100.0 / 194.0).abs() < 1e-9,
+        "64 of 194 inputs hit cache, got {hit}"
+    );
+    let cost = metrics
+        .cost_usd
+        .expect("priced by the config table — the fixture reported no charge");
+    assert!(
+        (cost - 0.0000255).abs() < 1e-12,
+        "130×0.15 + 64×0.075 + 2×0.60 per million, got {cost}"
+    );
+}

@@ -14,11 +14,13 @@
 //! same events over channels.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 
 use crate::assembly::{Assembler, CacheBust};
 use crate::config::Config;
+use crate::metrics::TurnMetrics;
 use crate::provider::{CompletionRequest, Provider, ProviderError, StreamAssembler, StreamEvent};
 use crate::session::schema::Outcome;
 use crate::session::writer::WriterError;
@@ -40,15 +42,21 @@ pub struct LoopOptions {
     pub max_tokens: Option<u32>,
     /// Sampling temperature (`None` = provider default).
     pub temperature: Option<f32>,
+    /// The config file's price-table entry for [`Self::model`] (stage
+    /// 3.3), resolved once — `None` for unlisted models (no estimated
+    /// cost, never a hardcoded price).
+    pub price: Option<crate::config::ModelPrice>,
 }
 
 impl LoopOptions {
     /// Options from the layered config (stage 0.2 fields + stage 1.9
-    /// loop knobs). The model is caller-chosen — config does not select
-    /// models yet.
+    /// loop knobs + the stage-3.3 price table). The model is
+    /// caller-chosen — config does not select models yet.
     pub fn from_config(config: &Config, model: impl Into<String>) -> Self {
+        let model = model.into();
         Self {
-            model: model.into(),
+            price: config.pricing.get(&model).cloned(),
+            model,
             max_turns: config.max_turns,
             max_tokens_budget: config.max_tokens_budget,
             max_tokens: None,
@@ -58,7 +66,9 @@ impl LoopOptions {
 }
 
 /// Progress the loop streams to its observer as it happens.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: [`LoopEvent::Metrics`] carries `f64` readings (stage 3.3).
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoopEvent<'a> {
     /// A fragment of assistant text, in arrival order.
     TextDelta(&'a str),
@@ -78,6 +88,9 @@ pub enum LoopEvent<'a> {
         system_changed: bool,
         tools_changed: bool,
     },
+    /// This turn's metrics, right after they were recorded (stage 3.3)
+    /// — what the stage-3.4 gauge and the TUI status line render.
+    Metrics(TurnMetrics),
 }
 
 /// How a run ended.
@@ -102,9 +115,10 @@ pub enum LoopOutcome {
 /// One conversation event the loop mirrors for durability (stage 2.3).
 ///
 /// `run_recorded` hands these to its recorder in transcript order —
-/// assistant message, that turn's usage, then each tool result as it is
-/// dispatched — so a recorder writing them as `message`/`usage` events
-/// reproduces the conversation a resume will rehydrate.
+/// assistant message, that turn's usage, that turn's metrics, then each
+/// tool result as it is dispatched (see [`Recorded`]) — so a recorder
+/// writing them as `message`/`usage`/`turn_metrics` events reproduces
+/// the conversation a resume will rehydrate.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Recorded {
     /// A message the loop just appended to the conversation.
@@ -118,6 +132,9 @@ pub enum Recorded {
         usage: Usage,
         input_token_delta: Option<i64>,
     },
+    /// This turn's measurements (stage 3.3) — ttft, generation speed,
+    /// cache hit and cost — recorded right after the turn's usage.
+    Metrics(TurnMetrics),
 }
 
 /// Why a recording run stopped.
@@ -252,19 +269,40 @@ where
         // Stage 3.2: count the canonical prefix before it is sent, to
         // reconcile against the provider's actual input tokens.
         let estimated_input = tokens::estimate_input(&request);
+        // Stage 3.3: time the request → first token → stream end.
+        let request_sent = Instant::now();
         let mut stream = provider.complete_stream(request).await?;
 
         let mut assembler = StreamAssembler::new();
+        let mut first_token: Option<Instant> = None;
         while let Some(event) = stream.next().await {
             let event = event?;
+            if first_token.is_none()
+                && matches!(
+                    event,
+                    StreamEvent::DeltaText(_) | StreamEvent::DeltaToolCall { .. }
+                )
+            {
+                // Tool-call fragments are tokens too — a tool-only turn
+                // still has a first token.
+                first_token = Some(Instant::now());
+            }
             if let StreamEvent::DeltaText(text) = &event {
                 observer(LoopEvent::TextDelta(text));
             }
             assembler.push(event);
         }
+        let stream_ended = Instant::now();
         let response = assembler.finish()?;
 
         usage = usage.plus(&response.usage);
+        let metrics = TurnMetrics::compute(
+            turns,
+            &response.usage,
+            opts.price.as_ref(),
+            first_token.map(|token| token.duration_since(request_sent)),
+            first_token.map_or(Duration::ZERO, |token| stream_ended.duration_since(token)),
+        );
 
         let text = plain_text(&response.message);
         let calls: Vec<ToolCall> = response
@@ -287,6 +325,10 @@ where
             input_token_delta: (response.usage.input_tokens > 0)
                 .then(|| tokens::reconcile(estimated_input, response.usage.input_tokens)),
         })?;
+        // Stage 3.3: record the measurements, then surface them — the
+        // transcript is the source of truth, the gauge is a view.
+        recorder(Recorded::Metrics(metrics.clone()))?;
+        observer(LoopEvent::Metrics(metrics));
 
         if calls.is_empty() {
             return Ok(LoopOutcome::Completed { text, turns, usage });

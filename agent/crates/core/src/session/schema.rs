@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::metrics::TurnMetrics;
 use crate::types::{Message, Usage};
 
 /// Schema version written into every line and required by every reader.
@@ -20,7 +21,13 @@ pub const SCHEMA_VERSION: u32 = 0;
 /// Every `type` value this v0 reader understands. Kept as a list so
 /// [`Envelope::from_line`] can reject unknown types with a typed error
 /// before serde does; a test asserts it matches [`Event`] exactly.
-const KNOWN_TYPES: &[&str] = &["session_start", "message", "usage", "session_end"];
+const KNOWN_TYPES: &[&str] = &[
+    "session_start",
+    "message",
+    "usage",
+    "session_end",
+    "turn_metrics",
+];
 
 /// Why a run stopped (mirrors the loop's `LoopOutcome`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +88,10 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         ended_at: OffsetDateTime,
     },
+    /// This turn's measurements (stage 3.3) — written right after the
+    /// turn's `usage` event. Never rehydrated into the conversation;
+    /// purely an accounting record.
+    TurnMetrics(TurnMetrics),
 }
 
 /// A transcript line could not be encoded or decoded.
@@ -368,6 +379,70 @@ mod tests {
         );
     }
 
+    /// Stage 3.3 — a fully-populated `turn_metrics` line round trips,
+    /// and its JSON is flat under the tag (same shape as `message`).
+    #[test]
+    fn turn_metrics_event_round_trips() {
+        let line = Envelope::new(Event::TurnMetrics(TurnMetrics {
+            turn: 1,
+            ttft_ms: Some(184),
+            tokens_per_sec: 62.5,
+            cache_hit_pct: Some(32.98969072164949),
+            cost_usd: Some(0.0042),
+        }))
+        .to_line()
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "v": 0,
+                "type": "turn_metrics",
+                "turn": 1,
+                "ttft_ms": 184,
+                "tokens_per_sec": 62.5,
+                "cache_hit_pct": 32.98969072164949,
+                "cost_usd": 0.0042
+            }),
+            "metrics spread flat under the type tag"
+        );
+        assert_eq!(
+            Envelope::from_line(&line).unwrap(),
+            Envelope::new(Event::TurnMetrics(TurnMetrics {
+                turn: 1,
+                ttft_ms: Some(184),
+                tokens_per_sec: 62.5,
+                cache_hit_pct: Some(32.98969072164949),
+                cost_usd: Some(0.0042),
+            }))
+        );
+    }
+
+    /// Optional metrics (no ttft, no cache report, no cost) keep the
+    /// line minimal — the ones an old or uninstrumented run produces.
+    #[test]
+    fn turn_metrics_absent_optionals_keep_the_shape_minimal() {
+        let line = Envelope::new(Event::TurnMetrics(TurnMetrics {
+            turn: 2,
+            ttft_ms: None,
+            tokens_per_sec: 0.0,
+            cache_hit_pct: None,
+            cost_usd: None,
+        }))
+        .to_line()
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "v": 0,
+                "type": "turn_metrics",
+                "turn": 2,
+                "tokens_per_sec": 0.0
+            })
+        );
+    }
+
     #[test]
     fn session_end_event_shape() {
         let line = Envelope::new(Event::SessionEnd {
@@ -418,6 +493,13 @@ mod tests {
                 usage: Usage::default(),
                 ended_at: ts(),
             },
+            Event::TurnMetrics(TurnMetrics {
+                turn: 3,
+                ttft_ms: Some(184),
+                tokens_per_sec: 62.5,
+                cache_hit_pct: Some(32.99),
+                cost_usd: Some(0.0042),
+            }),
         ];
         for event in events {
             let line = Envelope::new(event.clone()).to_line().unwrap();
@@ -515,6 +597,13 @@ mod tests {
                 usage: Usage::default(),
                 ended_at: ts(),
             },
+            Event::TurnMetrics(TurnMetrics {
+                turn: 1,
+                ttft_ms: None,
+                tokens_per_sec: 0.0,
+                cache_hit_pct: None,
+                cost_usd: None,
+            }),
         ];
         for event in &events {
             let line = Envelope::new(event.clone()).to_line().unwrap();
@@ -584,6 +673,13 @@ mod tests {
                 },
                 input_token_delta: None,
             }),
+            Envelope::new(Event::TurnMetrics(TurnMetrics {
+                turn: 1,
+                ttft_ms: Some(184),
+                tokens_per_sec: 41.4,
+                cache_hit_pct: Some(93.5),
+                cost_usd: Some(0.0011),
+            })),
             Envelope::new(Event::SessionEnd {
                 outcome: Outcome::Completed,
                 turns: 1,

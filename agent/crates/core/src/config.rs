@@ -36,7 +36,9 @@ pub const DEFAULT_MAX_TURNS: u32 = 50;
 pub const DEFAULT_MAX_TOKENS_BUDGET: u64 = 250_000;
 
 /// Layered configuration values (no secrets, by design).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Not `Eq`: the stage-3.3 price table carries `f64` rates.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// OpenAI-compatible provider endpoint.
     #[serde(default = "default_base_url")]
@@ -52,6 +54,26 @@ pub struct Config {
     /// policy: reads allowed, everything else asks.
     #[serde(default)]
     pub permissions: BTreeMap<String, Decision>,
+    /// Pluggable price table (stage 3.3): model id → USD rates per
+    /// million tokens. **File-layer only** (like `permissions` — env and
+    /// flag layers carry scalars, not maps) and never hardcoded: a model
+    /// missing from the table simply reports no estimated cost.
+    #[serde(default)]
+    pub pricing: BTreeMap<String, ModelPrice>,
+}
+
+/// USD price list for one model (stage 3.3) — per million tokens,
+/// straight from the config file's `[pricing."<model>"]` table.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelPrice {
+    /// Rate for uncached input tokens.
+    pub input_per_million: f64,
+    /// Rate for output (completion) tokens.
+    pub output_per_million: f64,
+    /// Discounted rate for input tokens read from the provider's
+    /// prompt cache. Absent → the cached share bills at the input rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_per_million: Option<f64>,
 }
 
 fn default_base_url() -> String {
@@ -73,6 +95,7 @@ impl Default for Config {
             max_turns: default_max_turns(),
             max_tokens_budget: default_max_tokens_budget(),
             permissions: BTreeMap::new(),
+            pricing: BTreeMap::new(),
         }
     }
 }
@@ -149,6 +172,9 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         }
         if table.contains_key("permissions") {
             config.permissions = file.permissions;
+        }
+        if table.contains_key("pricing") {
+            config.pricing = file.pricing;
         }
     }
 
@@ -434,6 +460,51 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(err, ConfigError::Parse(_)), "got {err:?}");
+    }
+
+    /// Stage 3.3 — the price table is a file-layer map (env/flag layers
+    /// carry scalars), absent by default: an unlisted model simply has
+    /// no table entry to estimate cost from.
+    #[test]
+    fn price_table_is_file_layer_and_defaults_empty() {
+        let cfg = load(None, &map(&[]), None);
+        assert!(cfg.pricing.is_empty(), "no hardcoded prices by default");
+
+        let cfg = load(
+            Some(
+                r#"
+                [pricing."openai/gpt-4o-mini"]
+                input_per_million = 0.15
+                output_per_million = 0.60
+                cached_input_per_million = 0.075
+
+                [pricing."anthropic/claude-3.5-sonnet"]
+                input_per_million = 3.0
+                output_per_million = 15.0
+                "#,
+            ),
+            &map(&[]),
+            None,
+        );
+        assert_eq!(
+            cfg.pricing.get("openai/gpt-4o-mini"),
+            Some(&ModelPrice {
+                input_per_million: 0.15,
+                output_per_million: 0.60,
+                cached_input_per_million: Some(0.075),
+            }),
+            "per-model rates come from the file, not the code"
+        );
+        assert_eq!(
+            cfg.pricing.get("anthropic/claude-3.5-sonnet"),
+            Some(&ModelPrice {
+                input_per_million: 3.0,
+                output_per_million: 15.0,
+                cached_input_per_million: None,
+            }),
+            "cached rate is optional — absent bills at the input rate"
+        );
+        assert_eq!(cfg.pricing.get("some/unknown-model"), None);
     }
 
     #[test]

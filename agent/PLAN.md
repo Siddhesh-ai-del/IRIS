@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 3.3 (metrics collector — per-turn ttft/tokens-per-sec/cache-hit/cost)
-- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.3
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13)
+- **Next action:** Stage 3.4 (live gauge rendering, headless first — status line from `LoopEvent::Metrics`)
+- **Current phase:** 3 — Cache-First Sessions (in progress); next: 3.4
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -445,9 +445,16 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   (4 tokens stubs, wire/stream mapping, loop delta, index cost, CLI E2E) + 3 shape guards;
   279 total green, clippy/fmt clean. Note: `Usage`/`LoopOutcome` dropped `Eq` (cost is f64).
 
-- [ ] **3.3 Metrics collector** (1h) — `crates/core/src/metrics.rs`: per-turn `ttft_ms`,
+- [x] **3.3 Metrics collector** (1h) — `crates/core/src/metrics.rs`: per-turn `ttft_ms`,
   `tokens_per_sec`, `cache_hit_pct`, `cost_usd` from a pluggable price table (config, not
   hardcoded); immutable `TurnMetrics` events appended to transcript. Risk: Low · Depends: 3.2
+  **Done (2026-10-14):** `TurnMetrics::compute` + file-layer `[pricing."<model>"]` map
+  (`ModelPrice`, per-million USD, defaults empty — no hardcoded prices); cost precedence =
+  provider report (3.2) → price-table estimate → `None`; loop times request → first token →
+  stream end and emits `Recorded::Metrics` + `LoopEvent::Metrics` after each usage record;
+  new `turn_metrics` event type (flat under the tag, schema v0 additive — KNOWN_TYPES + doc
+  test + realistic-transcript snapshot updated per D5). `Config` dropped `Eq` (f64 rates).
+  289 total green, clippy/fmt clean.
 
 - [ ] **3.4 Live gauge rendering (headless first)** (1h) — status line in `run -p` and interactive
   console mode; validate numbers **before** any TUI work.

@@ -18,7 +18,7 @@ Every line carries a versioned envelope:
 | Envelope field | Type | Meaning |
 |---|---|---|
 | `v` | integer | Schema version. This document describes **v0**. Readers must reject versions they do not know rather than guess. |
-| `type` | string | Event type, one of the four below. |
+| `type` | string | Event type, one of the five below. |
 
 ## Versioning policy
 
@@ -86,6 +86,23 @@ lines written before stage 3.2):
 ```json
 {"v":0,"type":"usage","turn":1,"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154}}
 {"v":0,"type":"usage","turn":2,"usage":{"input_tokens":194,"output_tokens":2,"total_tokens":196,"cached_input_tokens":64,"cost_usd":0.0042},"input_token_delta":17}
+```
+
+### `turn_metrics`
+
+Per-turn measurements (stage 3.3), written right after the turn's `usage` event.
+Accounting only — readers rehydrating a conversation ignore it (like `usage`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `turn` | integer | 1-based turn — the same number as the turn's `usage` event. |
+| `ttft_ms` | integer (optional) | Milliseconds from request sent to the first streamed token (text or tool-call arguments). Absent when no token arrived. |
+| `tokens_per_sec` | number | Completion tokens per second of streaming, measured first token → stream end. `0.0` when nothing streamed. |
+| `cache_hit_pct` | number (optional) | Cached share of input tokens, 0–100. Absent when the provider reports no cache accounting — unreported is not empty. |
+| `cost_usd` | number (optional) | The provider's own charge (see `usage.cost_usd`) when reported; otherwise an estimate from the config file's `[pricing."<model>"]` table; otherwise absent — never a hardcoded price. |
+
+```json
+{"v":0,"type":"turn_metrics","turn":1,"ttft_ms":184,"tokens_per_sec":62.5,"cache_hit_pct":32.99,"cost_usd":0.0042}
 ```
 
 ### `session_end`

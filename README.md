@@ -62,7 +62,7 @@ configuration, the OpenRouter client with SSE streaming, five tools behind a
 config-backed permission gate, the headless agent loop, and durable sessions
 (crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
 index) have landed and are runnable via `iris run -p` — all under
-test-driven development (279 tests). There are no versioned releases yet.
+test-driven development (289 tests). There are no versioned releases yet.
 
 ### Roadmap
 

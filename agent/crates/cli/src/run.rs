@@ -230,6 +230,9 @@ pub(crate) fn execute(
                 };
                 eprintln!("[iris] cache-bust: {what} changed — prompt cache invalidated");
             }
+            // Stage 3.4 renders the live gauge from these; headless 3.3
+            // records them to the transcript only (via the recorder).
+            LoopEvent::Metrics(_) => {}
         },
         |recorded| {
             let appended = match recorded {
@@ -243,6 +246,7 @@ pub(crate) fn execute(
                     usage,
                     input_token_delta,
                 }),
+                Recorded::Metrics(metrics) => writer.append(&Event::TurnMetrics(metrics)),
             };
             Ok(appended?)
         },

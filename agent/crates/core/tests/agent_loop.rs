@@ -18,7 +18,8 @@ use serde_json::{Value, json};
 use iris_core::agent_loop::{
     LoopEvent, LoopOptions, LoopOutcome, Recorded, RunError, run, run_recorded,
 };
-use iris_core::config::{Config, ConfigInputs, load_config};
+use iris_core::config::{Config, ConfigInputs, ModelPrice, load_config};
+use iris_core::metrics::TurnMetrics;
 use iris_core::provider::{
     CompletionRequest, CompletionResponse, EventStream, OpenAiClient, Provider, ProviderError,
     StreamEvent,
@@ -183,6 +184,7 @@ fn options(max_turns: u32, max_tokens_budget: u64) -> LoopOptions {
         max_tokens_budget,
         max_tokens: None,
         temperature: None,
+        price: None,
     }
 }
 
@@ -473,6 +475,9 @@ async fn observer_sees_streamed_text_and_tool_lifecycle() {
             // must never contribute a line (the final equality proves
             // it if it ever does).
             LoopEvent::CacheBust { .. } => "cache-bust".to_string(),
+            // Timing-dependent (stage 3.3) — this assertion pins event
+            // *ordering*, so metrics ride their own event instead.
+            LoopEvent::Metrics(_) => return,
         };
         sink.lock().unwrap().push(line);
     };
@@ -695,6 +700,14 @@ async fn run_recorded_mirrors_the_conversation_in_transcript_order() {
         "got {outcome:?}"
     );
 
+    // Stage 3.3 metrics ride between each usage and its tool results;
+    // this test pins the conversation mirroring, so set them aside —
+    // their own test (`records_per_turn_metrics…`) covers them.
+    let recorded: Vec<Recorded> = recorded
+        .into_iter()
+        .filter(|event| !matches!(event, Recorded::Metrics(_)))
+        .collect();
+
     assert_eq!(
         recorded.len(),
         5,
@@ -731,7 +744,7 @@ async fn run_recorded_mirrors_the_conversation_in_transcript_order() {
         .iter()
         .filter_map(|event| match event {
             Recorded::Message(msg) => Some(msg),
-            Recorded::Usage { .. } => None,
+            Recorded::Usage { .. } | Recorded::Metrics(_) => None,
         })
         .collect();
     let (final_answer, mirrored) = recorded_messages.split_last().unwrap();
@@ -935,4 +948,89 @@ async fn records_the_reconciliation_delta_on_every_usage_event() {
         }
         other => panic!("expected Completed, got {other:?}"),
     }
+}
+
+// --- per-turn metrics (stage 3.3) -----------------------------------------
+
+/// Every response gets a `TurnMetrics` handed to the recorder (the
+/// transcript's `turn_metrics` event) and to the observer (the
+/// stage-3.4 gauge), measured from the real stream: ttft present,
+/// cache hit from the provider's report, cost from the config price
+/// table when the provider didn't charge one.
+#[tokio::test]
+async fn records_per_turn_metrics_and_delivers_them_to_the_observer() {
+    let fired = Arc::new(AtomicBool::new(false));
+    let scripted = Scripted::new(vec![CompletionResponse {
+        message: Message::text(Role::Assistant, "hi"),
+        stop_reason: StopReason::EndTurn,
+        usage: Usage {
+            input_tokens: 194,
+            output_tokens: 2,
+            total_tokens: 196,
+            cached_input_tokens: Some(64),
+            cost_usd: None,
+        },
+    }]);
+    let registry = marker_registry(&fired);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+
+    let mut opts = options(5, u64::MAX);
+    opts.price = Some(ModelPrice {
+        input_per_million: 0.15,
+        output_per_million: 0.60,
+        cached_input_per_million: Some(0.075),
+    });
+
+    let mut recorded_metrics: Vec<TurnMetrics> = Vec::new();
+    let mut observed_metrics: Vec<TurnMetrics> = Vec::new();
+    let outcome = run_recorded(
+        &scripted,
+        &registry,
+        &ctx,
+        &DenyOnAsk,
+        &opts,
+        vec![Message::text(Role::User, "go")],
+        |event| {
+            if let LoopEvent::Metrics(metrics) = event {
+                observed_metrics.push(metrics.clone());
+            }
+        },
+        |recorded| {
+            if let Recorded::Metrics(metrics) = recorded {
+                recorded_metrics.push(metrics);
+            }
+            Ok(())
+        },
+    )
+    .await
+    .expect("loop must run");
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+
+    assert_eq!(
+        recorded_metrics.len(),
+        1,
+        "one metrics record per provider response"
+    );
+    let metrics = &recorded_metrics[0];
+    assert_eq!(metrics.turn, 1, "matches its usage event's turn");
+    assert!(metrics.ttft_ms.is_some(), "a token did arrive");
+    assert!(metrics.tokens_per_sec >= 0.0);
+    let hit = metrics.cache_hit_pct.expect("cache was reported");
+    assert!(
+        (hit - 64.0 * 100.0 / 194.0).abs() < 1e-9,
+        "64 of 194 inputs hit cache, got {hit}"
+    );
+    // Provider reported no charge → the price table estimates it.
+    let cost = metrics.cost_usd.expect("estimated from the table");
+    assert!(
+        (cost - 0.0000255).abs() < 1e-12,
+        "130×0.15 + 64×0.075 + 2×0.60 per million, got {cost}"
+    );
+
+    assert_eq!(
+        observed_metrics, recorded_metrics,
+        "the observer sees exactly what the transcript records"
+    );
 }
