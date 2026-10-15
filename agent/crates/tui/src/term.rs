@@ -35,7 +35,9 @@ use iris_core::tools::{DenyOnAsk, ToolContext, ToolRegistry};
 use iris_core::types::{Message, Role};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -75,8 +77,14 @@ where
 {
     enable_raw_mode().map_err(|err| format!("cannot enter raw mode: {err}"))?;
     let _restore = RestoreGuard;
-    execute!(std::io::stdout(), EnterAlternateScreen)
-        .map_err(|err| format!("cannot enter alternate screen: {err}"))?;
+    // Bracketed paste makes terminals deliver pastes as one `Event::
+    // Paste` instead of a storm of key events (4.2).
+    execute!(
+        std::io::stdout(),
+        EnterAlternateScreen,
+        EnableBracketedPaste
+    )
+    .map_err(|err| format!("cannot enter alternate screen: {err}"))?;
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal =
         Terminal::new(backend).map_err(|err| format!("terminal init failed: {err}"))?;
@@ -144,42 +152,41 @@ where
         if !event::poll(TICK).map_err(|err| format!("input poll failed: {err}"))? {
             continue;
         }
-        let Event::Key(key) = event::read().map_err(|err| format!("input read failed: {err}"))?
-        else {
-            continue; // resize etc. — the next draw covers it
-        };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        let Some(prompt) = app.handle_key(key) else {
-            continue;
-        };
+        match event::read().map_err(|err| format!("input read failed: {err}"))? {
+            Event::Paste(text) => app.handle_paste(&text),
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                let Some(prompt) = app.handle_key(key) else {
+                    continue;
+                };
 
-        // Record the user turn first (transcript is the resume
-        // primitive), then start the run in the background.
-        let user = Message::text(Role::User, prompt);
-        let recorded = writer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .append(&TranscriptEvent::Message(user.clone()));
-        if let Err(err) = recorded {
-            app.handle(AppEvent::Error {
-                message: format!("transcript write failed: {err}"),
-            });
-            continue;
+                // Record the user turn first (transcript is the resume
+                // primitive), then start the run in the background.
+                let user = Message::text(Role::User, prompt);
+                let recorded = writer
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .append(&TranscriptEvent::Message(user.clone()));
+                if let Err(err) = recorded {
+                    app.handle(AppEvent::Error {
+                        message: format!("transcript write failed: {err}"),
+                    });
+                    continue;
+                }
+                history.push(user);
+                run_text.clear();
+                spawn_run(
+                    rt,
+                    &provider,
+                    &registry,
+                    &ctx,
+                    &opts,
+                    history.clone(),
+                    tx.clone(),
+                    Arc::clone(&writer),
+                );
+            }
+            _ => {} // resize etc. — the next draw covers it
         }
-        history.push(user);
-        run_text.clear();
-        spawn_run(
-            rt,
-            &provider,
-            &registry,
-            &ctx,
-            &opts,
-            history.clone(),
-            tx.clone(),
-            Arc::clone(&writer),
-        );
     }
     Ok(())
 }
@@ -263,7 +270,11 @@ struct RestoreGuard;
 impl Drop for RestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(
+            std::io::stdout(),
+            LeaveAlternateScreen,
+            DisableBracketedPaste
+        );
     }
 }
 

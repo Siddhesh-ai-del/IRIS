@@ -1,8 +1,14 @@
-//! The TUI application state machine (stage 4.1).
+//! The TUI application state machine.
 //!
 //! Pure, synchronous, and fully unit-testable: it owns no terminal and
 //! no channels — [`crate::term`] feeds it loop events and key presses;
 //! [`crate::ui`] renders an `&App` snapshot.
+//!
+//! Composer (stage 4.2): a `ratatui-textarea` multiline draft with
+//! history recall (Up/Down at the composer's edges), locally
+//! dispatched [`COMMANDS`] (`/help` `/quit` `/clear` — never sent to
+//! the model), bracketed-paste insertion, and a scrollback distance
+//! ([`PAGE_LINES`] per page) that fresh output re-anchors to the tail.
 //!
 //! The three states the plan names, and what they mean here:
 //!
@@ -17,8 +23,21 @@
 
 use iris_core::metrics::TurnMetrics;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui_textarea::TextArea;
 
 use crate::events::AppEvent;
+
+/// How many lines one scrollback page moves ([`App::page_up`] /
+/// [`App::page_down`]).
+pub const PAGE_LINES: u16 = 10;
+
+/// The `/`-commands the composer dispatches locally (stage 4.2).
+/// Further commands (e.g. `/model`) join when their features do.
+pub const COMMANDS: [(&str, &str); 3] = [
+    ("/help", "list these commands"),
+    ("/quit", "exit iris"),
+    ("/clear", "clear the screen (the session keeps recording)"),
+];
 
 /// Which of the three run states the app is in (plan 4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +74,7 @@ pub struct PendingPermission {
 }
 
 /// The whole UI-facing state of a chat session.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct App {
     state: AppState,
     /// Raw assistant text accumulated so far (stage 4.3 swaps the
@@ -63,8 +82,18 @@ pub struct App {
     transcript: String,
     /// Last status line (tool lifecycle, run outcome, errors).
     status: String,
-    /// The minimal single-line composer (stage 4.2 grows it).
-    prompt: String,
+    /// The multiline composer (stage 4.2, `ratatui-textarea`).
+    composer: TextArea<'static>,
+    /// Previously submitted prompts, oldest first (4.2).
+    history: Vec<String>,
+    /// Position in [`App::history`] while browsing; `None` = editing
+    /// a fresh draft (4.2).
+    history_cursor: Option<usize>,
+    /// The unsent text saved when history browsing starts (4.2).
+    draft: String,
+    /// Transcript scrollback distance from the tail, in lines — 0
+    /// follows new output (4.2).
+    scroll_from_bottom: u16,
     /// A loop task is in flight.
     running: bool,
     /// The user asked to quit.
@@ -88,7 +117,11 @@ impl App {
             state: AppState::Idle,
             transcript: String::new(),
             status: String::new(),
-            prompt: String::new(),
+            composer: TextArea::default(),
+            history: Vec::new(),
+            history_cursor: None,
+            draft: String::new(),
+            scroll_from_bottom: 0,
             running: false,
             quit: false,
             pending: None,
@@ -111,9 +144,9 @@ impl App {
         &self.status
     }
 
-    /// The composer's current content.
-    pub fn prompt(&self) -> &str {
-        &self.prompt
+    /// The composer's current content (lines joined with `\n`).
+    pub fn prompt(&self) -> String {
+        self.composer.lines().join("\n")
     }
 
     /// Whether a loop task is in flight.
@@ -136,6 +169,39 @@ impl App {
         self.last_metrics.as_ref()
     }
 
+    /// How far the transcript view is paged up from the tail, in
+    /// lines — 0 means "following new output".
+    pub fn scroll_from_bottom(&self) -> u16 {
+        self.scroll_from_bottom
+    }
+
+    /// The composer widget's state, for [`crate::ui`]'s render pass.
+    pub fn composer(&self) -> &TextArea<'static> {
+        &self.composer
+    }
+
+    /// Page the transcript scrollback up (older output) by
+    /// [`PAGE_LINES`]. Overshoot clamps at the head in the render
+    /// pass, which knows the visible height.
+    pub fn page_up(&mut self) {
+        self.scroll_from_bottom = self.scroll_from_bottom.saturating_add(PAGE_LINES);
+    }
+
+    /// Page the transcript scrollback down by [`PAGE_LINES`],
+    /// clamped at the tail.
+    pub fn page_down(&mut self) {
+        self.scroll_from_bottom = self.scroll_from_bottom.saturating_sub(PAGE_LINES);
+    }
+
+    /// Insert a bracketed paste verbatim into the composer — dropped
+    /// while a run is in flight, like every other composer key.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.running {
+            return;
+        }
+        self.composer.insert_str(text);
+    }
+
     /// Apply one loop/lifecycle event — the state machine itself.
     ///
     /// The loop is a single FIFO producer, so events arrive in the
@@ -146,6 +212,10 @@ impl App {
             AppEvent::Delta(text) => {
                 self.transcript.push_str(&text);
                 self.state = AppState::Streaming;
+                // Fresh output re-anchors the scrollback to the tail —
+                // the view follows what is happening (4.3's auto-scroll
+                // refines this against manual paging).
+                self.scroll_from_bottom = 0;
             }
             AppEvent::ToolStart { id, name } => {
                 self.state = AppState::Streaming;
@@ -196,34 +266,142 @@ impl App {
     /// Apply one key press. Returns `Some(prompt)` when Enter submits
     /// a new run request (the shell starts the loop with it).
     ///
-    /// Keys while a run is in flight are dropped except Ctrl-C — the
-    /// queued/queued-aware composer is stage 4.2.
+    /// Key map (stage 4.2): Enter sends; Shift+Enter or Ctrl-J break
+    /// the line (unix terminals deliver Ctrl-J as Enter+CONTROL);
+    /// Up/Down recall history at the composer's top/bottom row and
+    /// move the cursor otherwise; PageUp/PageDown page the transcript
+    /// scrollback (they work mid-run — reading output is the point);
+    /// Esc clears the draft, then quits when idle; Ctrl-C always
+    /// quits. Everything else is the textarea's editing keys.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
             return None;
         }
-        if self.running {
-            return None;
-        }
         match key.code {
-            KeyCode::Esc if self.prompt.is_empty() && self.state == AppState::Idle => {
-                self.quit = true;
+            KeyCode::PageUp => {
+                self.page_up();
+                return None;
             }
-            KeyCode::Esc => self.prompt.clear(),
-            KeyCode::Backspace => {
-                self.prompt.pop();
-            }
-            KeyCode::Char(c) => self.prompt.push(c),
-            KeyCode::Enter if !self.prompt.trim().is_empty() => {
-                let prompt = std::mem::take(&mut self.prompt);
-                self.state = AppState::Streaming;
-                self.running = true;
-                return Some(prompt);
+            KeyCode::PageDown => {
+                self.page_down();
+                return None;
             }
             _ => {}
         }
+        if self.running {
+            return None;
+        }
+        let line_break = key.code == KeyCode::Enter
+            && (key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::CONTROL));
+        match key.code {
+            KeyCode::Esc if self.prompt().is_empty() && self.state == AppState::Idle => {
+                self.quit = true;
+            }
+            KeyCode::Esc => {
+                self.composer.clear();
+            }
+            KeyCode::Enter if line_break => self.composer.insert_newline(),
+            KeyCode::Enter => return self.submit(),
+            // History only claims Up/Down at the composer's edges;
+            // inside a multiline draft they move the cursor.
+            KeyCode::Up if self.composer.cursor().0 == 0 => self.history_prev(),
+            KeyCode::Down if self.composer.cursor().0 + 1 == self.composer.lines().len() => {
+                self.history_next()
+            }
+            _ => {
+                self.composer.input(key);
+            }
+        }
         None
+    }
+
+    /// A non-empty Enter: record the prompt (it is what the transcript
+    /// and resume will show), then either dispatch a `/command`
+    /// locally or hand the run request to the shell.
+    fn submit(&mut self) -> Option<String> {
+        let prompt = self.prompt();
+        let prompt = prompt.trim_end_matches('\n').to_string();
+        if prompt.trim().is_empty() {
+            return None;
+        }
+        self.history.push(prompt.clone());
+        self.history_cursor = None;
+        self.draft.clear();
+        self.composer = TextArea::default();
+
+        if prompt.starts_with('/') {
+            self.dispatch_command(&prompt);
+            return None;
+        }
+        self.state = AppState::Streaming;
+        self.running = true;
+        Some(prompt)
+    }
+
+    /// Slash commands run here, never in the loop — no tokens, no
+    /// transcript write, no run state.
+    fn dispatch_command(&mut self, text: &str) {
+        match text {
+            "/help" => {
+                self.status = COMMANDS
+                    .iter()
+                    .map(|(name, help)| format!("{name} — {help}"))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+            "/quit" => self.quit = true,
+            "/clear" => {
+                self.transcript.clear();
+                self.scroll_from_bottom = 0;
+                self.status = "screen cleared".into();
+            }
+            other => self.status = format!("unknown command: {other} — try /help"),
+        }
+    }
+
+    /// Recall the previous history entry, saving the unsent draft the
+    /// first time (it comes back when the cursor leaves the end).
+    fn history_prev(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        let next = match self.history_cursor {
+            Some(0) => return, // already at the oldest
+            Some(index) => index - 1,
+            None => {
+                self.draft = self.prompt();
+                self.history.len() - 1
+            }
+        };
+        self.history_cursor = Some(next);
+        let text = self.history[next].clone();
+        self.set_prompt(&text);
+    }
+
+    /// Recall the next history entry; past the newest, restore the
+    /// saved draft.
+    fn history_next(&mut self) {
+        let Some(index) = self.history_cursor else {
+            return; // not browsing
+        };
+        let next = index + 1;
+        if next < self.history.len() {
+            self.history_cursor = Some(next);
+            let text = self.history[next].clone();
+            self.set_prompt(&text);
+        } else {
+            // Past the newest entry: back to a fresh draft.
+            self.history_cursor = None;
+            let draft = std::mem::take(&mut self.draft);
+            self.set_prompt(&draft);
+        }
+    }
+
+    /// Replace the composer's content (history recall).
+    fn set_prompt(&mut self, text: &str) {
+        self.composer = TextArea::new(text.split('\n').map(String::from).collect());
     }
 }
 
@@ -385,5 +563,137 @@ mod tests {
             tools_changed: false,
         });
         assert_eq!(app.status(), "cache-bust: system prompt changed");
+    }
+
+    #[test]
+    fn shift_enter_and_ctrl_j_break_lines_while_enter_sends() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('a')));
+
+        // On unix terminals Ctrl-J arrives as Enter+CONTROL; that is
+        // the portable line break (kitty-protocol terminals also send
+        // Shift+Enter).
+        assert_eq!(
+            app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+            None,
+            "Ctrl-J must break the line, not submit"
+        );
+        app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.prompt(), "a\nb", "the break split the composer");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.prompt(), "a\nb\nc");
+
+        let submitted = app.handle_key(key(KeyCode::Enter));
+        assert_eq!(submitted, Some("a\nb\nc".into()), "plain Enter sends");
+        assert_eq!(app.prompt(), "", "the composer clears on submit");
+    }
+
+    #[test]
+    fn history_recalls_prompts_and_restores_the_draft() {
+        let mut app = App::new();
+        type_text(&mut app, "one");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some("one".into()));
+        app.handle(AppEvent::RunEnded {
+            summary: "done".into(),
+        });
+        type_text(&mut app, "two");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some("two".into()));
+        app.handle(AppEvent::RunEnded {
+            summary: "done".into(),
+        });
+
+        app.handle_key(key(KeyCode::Up));
+        assert_eq!(app.prompt(), "two");
+        app.handle_key(key(KeyCode::Up));
+        assert_eq!(app.prompt(), "one");
+        app.handle_key(key(KeyCode::Up));
+        assert_eq!(app.prompt(), "one", "clamped at the oldest entry");
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.prompt(), "two");
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.prompt(), "", "the unsent draft comes back");
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.prompt(), "", "clamped at the newest position");
+    }
+
+    #[test]
+    fn slash_commands_never_reach_the_loop() {
+        let mut app = App::new();
+        app.handle(AppEvent::Delta("some output\n".into()));
+
+        type_text(&mut app, "/help");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None, "/help is local");
+        assert!(
+            app.status().contains("/quit"),
+            "help lists every command: {}",
+            app.status()
+        );
+        assert!(!app.is_running(), "commands never start a run");
+
+        type_text(&mut app, "/clear");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+        assert_eq!(app.transcript(), "", "/clear resets the visible screen");
+        assert!(!app.is_running());
+
+        type_text(&mut app, "/nope");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+        assert!(
+            app.status().contains("unknown command"),
+            "unknown commands say so: {}",
+            app.status()
+        );
+
+        type_text(&mut app, "/quit");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn page_keys_scroll_the_scrollback_and_new_text_follows() {
+        let mut app = App::new();
+        for i in 0..50 {
+            app.handle(AppEvent::Delta(format!("line{i}\n")));
+        }
+        assert_eq!(
+            app.scroll_from_bottom(),
+            0,
+            "new output anchors to the tail"
+        );
+
+        app.handle_key(key(KeyCode::PageUp));
+        assert_eq!(
+            app.scroll_from_bottom(),
+            PAGE_LINES,
+            "PageUp pages into the scrollback"
+        );
+
+        app.page_up();
+        assert_eq!(app.scroll_from_bottom(), PAGE_LINES * 2);
+
+        app.page_down();
+        app.page_down();
+        app.page_down(); // overshoot
+        assert_eq!(app.scroll_from_bottom(), 0, "clamped at the tail");
+
+        app.handle(AppEvent::Delta("more\n".into()));
+        assert_eq!(app.scroll_from_bottom(), 0, "fresh output re-anchors");
+    }
+
+    #[test]
+    fn paste_lands_verbatim_in_the_composer() {
+        let mut app = App::new();
+        app.handle_paste("first line\nsecond line");
+        assert_eq!(app.prompt(), "first line\nsecond line");
+
+        type_text(&mut app, " one more");
+        assert_eq!(app.prompt(), "first line\nsecond line one more");
+
+        // A paste while a run is in flight stays out of the composer,
+        // like every other key.
+        assert!(app.handle_key(key(KeyCode::Enter)).is_some());
+        app.handle_paste("dropped");
+        assert_eq!(app.prompt(), "");
     }
 }

@@ -7,7 +7,8 @@ description = "Terminal UI shell for the iris coding agent (stage 4.x)"
 
 [dependencies]
 iris-core = { path = "../core" }
-ratatui = "0.29"
+ratatui = "0.30"
+ratatui-textarea = "0.9.3"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "time"] }
 
 [lints]

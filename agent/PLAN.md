@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.2 (composer — multiline input, history recall, /commands, paste, scrollback)
-- **Current phase:** 4 — TUI (in progress); next: 4.2
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15)
+- **Next action:** Stage 4.3 (streaming markdown pane — `tui-markdown`, code blocks, auto-scroll that pauses on manual scroll)
+- **Current phase:** 4 — TUI (in progress); next: 4.3
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -484,8 +484,18 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   interrupted (resumable) run, dangling `tool_use` after max_turns in-memory. 311 total green,
   clippy/fmt clean.
 
-- [ ] **4.2 Composer** (1h) — `ratatui-textarea`: multiline input, history recall, `/commands`,
-  paste, scrollback of transcript. Risk: Low · Depends: 4.1
+- [x] **4.2 Composer** (1h) — `ratatui-textarea`: multiline input, history recall, `/commands`,
+  paste, scrollback of transcript. Risk: Low · Depends: 4.1 — **Done 2026-10-15.** RED = 7 failures
+  (5 app, 2 ui) → GREEN. Dependency note: no `ratatui-textarea` release supports ratatui 0.29 (the
+  0.8+/0.9 line targets the ratatui 0.30 split family; 0.4.1 is deprecated), so the plan's named
+  crate was honored by bumping `ratatui` 0.29 → 0.30.2 — migration compiled clean and all 4.1 tests
+  stayed green. Composer is a `TextArea` (Enter sends, Shift+Enter/Ctrl-J newline, textarea editing
+  keys); Up/Down recall history only at the composer's edges with draft restore; `/help` `/quit`
+  `/clear` dispatch locally (never reach the loop; `COMMANDS` table drives both `/help` and the
+  hints); bracketed paste (`EnableBracketedPaste` + `Event::Paste` → `handle_paste`, dropped
+  mid-run like keys); transcript scrollback `PgUp`/`PgDn` (`PAGE_LINES` = 10, works mid-run, fresh
+  output re-anchors to the tail). Composer pane grew to 6 rows so multiline drafts are visible.
+  7 new tests → 318/318 green, clippy/fmt clean.
 
 - [ ] **4.3 Streaming markdown pane** (1h) — `tui-markdown` incremental render, code blocks with
   language tag, auto-scroll that doesn't fight the user (pause on manual scroll).
