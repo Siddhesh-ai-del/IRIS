@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 iris-core = { path = "../core" }
+iris-tui = { path = "../tui" }
 time = { version = "0.3.55", features = ["serde-well-known"] }
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "time"] }
 toml = "1.1.6"

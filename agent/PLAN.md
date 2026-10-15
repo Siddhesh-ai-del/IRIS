@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.1 (extract `crates/tui` + app skeleton — ratatui/crossterm event loop)
-- **Current phase:** 3 — Cache-First Sessions ✅ complete (3.1–3.4); next: 4 — TUI
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14)
+- **Next action:** Stage 4.2 (composer — multiline input, history recall, /commands, paste, scrollback)
+- **Current phase:** 4 — TUI (in progress); next: 4.2
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -469,9 +469,20 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 4 — TUI (6 stages, ~7h)
 
-- [ ] **4.1 Extract `crates/tui` + app skeleton** (1h) — ratatui + crossterm event loop; `App`
+- [x] **4.1 Extract `crates/tui` + app skeleton** (1h) — ratatui + crossterm event loop; `App`
   state machine (`Idle | Streaming | AwaitingPermission`); channels from core loop → UI;
   **no blocking in the render path**. Risk: Medium · Depends: 1.10
+  **Done (2026-10-15):** new `crates/tui` (`iris-tui`): pure `App` state machine (owned
+  `AppEvent` mirrors `LoopEvent` + permission/run lifecycle; keys: Enter submits, Esc clears/
+  quits, Ctrl-C quits); `ui::render(&App)` proven on `TestBackend` (header / transcript / status
+  / composer panes); `term::run` shell — raw-mode + restore guard, per-run tokio task feeding a
+  std mpsc channel, frame cycle = `try_recv` drain → draw → timed `poll` (nothing blocks the
+  render path); recorder mapping is a total `transcript_event` fn. `iris chat` wired through CLI
+  plumbing (same fail-fast + durable session as `run -p`; `--model` flag added). E2E: no-key
+  fails fast pre-terminal; no-tty path proven via `setsid -w` (never hijacks/hangs the dev's
+  terminal). Known 4.x gaps documented in `term.rs`: DenyOnAsk until 4.5, mid-run quit =
+  interrupted (resumable) run, dangling `tool_use` after max_turns in-memory. 311 total green,
+  clippy/fmt clean.
 
 - [ ] **4.2 Composer** (1h) — `ratatui-textarea`: multiline input, history recall, `/commands`,
   paste, scrollback of transcript. Risk: Low · Depends: 4.1

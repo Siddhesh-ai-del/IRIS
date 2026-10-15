@@ -1,0 +1,17 @@
+[package]
+name = "iris-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal UI shell for the iris coding agent (stage 4.x)"
+
+[dependencies]
+iris-core = { path = "../core" }
+ratatui = "0.29"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+futures = "0.3.34"

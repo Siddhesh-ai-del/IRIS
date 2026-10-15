@@ -62,7 +62,7 @@ configuration, the OpenRouter client with SSE streaming, five tools behind a
 config-backed permission gate, the headless agent loop, and durable sessions
 (crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
 index) have landed and are runnable via `iris run -p` — all under
-test-driven development (293 tests). There are no versioned releases yet.
+test-driven development (311 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -141,7 +141,8 @@ IRIS/
     ├── justfile       # fmt / lint / test / cov / ci
     └── crates/
         ├── core/      # iris-core — loop, tools, config, provider, sessions
-        └── cli/       # iris — the terminal binary (run, chat, sessions, doctor)
+        ├── cli/       # iris — the terminal binary (run, chat, sessions, doctor)
+        └── tui/       # iris-tui — the interactive shell (app state machine, panes)
 ```
 
 ## Contributing

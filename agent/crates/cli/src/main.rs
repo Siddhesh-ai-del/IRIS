@@ -1,6 +1,7 @@
 //! `iris` CLI entry point. Subcommands: `run`, `chat`, `sessions`, `doctor`
 //! (stage 0.2 defines the surface; execution semantics land in stages 1.10+).
 
+mod chat;
 mod doctor;
 mod gauge;
 mod run;
@@ -42,11 +43,15 @@ enum Commands {
         model: String,
     },
 
-    /// Start an interactive chat session
+    /// Start an interactive chat session (TUI, stage 4.1)
     Chat {
         /// Working directory for the agent
         #[arg(long, value_name = "DIR", default_value = ".")]
         workdir: PathBuf,
+
+        /// Model id (OpenRouter slug)
+        #[arg(long, value_name = "MODEL", default_value = "openai/gpt-4o-mini")]
+        model: String,
     },
 
     /// Manage saved sessions
@@ -103,12 +108,8 @@ fn main() {
             workdir,
             model,
         } => run::run(prompt, model, workdir, cli.base_url.as_deref(), &env),
-        Commands::Chat { workdir } => {
-            eprintln!(
-                "iris chat is not implemented yet (stage 4.x): workdir={}",
-                workdir.display()
-            );
-            2
+        Commands::Chat { workdir, model } => {
+            chat::run(workdir, model, cli.base_url.as_deref(), &env)
         }
         Commands::Sessions { action } => match action {
             SessionCommands::List { rebuild } => sessions::list(*rebuild, &env),

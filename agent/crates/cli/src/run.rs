@@ -51,17 +51,17 @@ pub const EXIT_MAX_TURNS: i32 = 3;
 /// Cumulative usage passed `max_tokens_budget`.
 pub const EXIT_BUDGET: i32 = 4;
 
-const SYSTEM_PROMPT: &str = "You are iris, a terminal-based AI coding agent. Use the \
+pub(crate) const SYSTEM_PROMPT: &str = "You are iris, a terminal-based AI coding agent. Use the \
                              provided tools to inspect and modify files in the working \
                              directory; answer in plain text when the task is done.";
 
 /// Everything a session run needs after the fail-fast checks — shared
-/// by `run` and `sessions resume` (stage 2.3).
+/// by `run`, `chat` and `sessions resume` (stages 2.3 + 4.1).
 pub(crate) struct Prepared {
-    config: Config,
-    api_key: String,
-    workdir: PathBuf,
-    registry: ToolRegistry,
+    pub(crate) config: Config,
+    pub(crate) api_key: String,
+    pub(crate) workdir: PathBuf,
+    pub(crate) registry: ToolRegistry,
 }
 
 /// Run one prompt to a stopping condition. Returns the process exit code.
