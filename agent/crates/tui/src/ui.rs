@@ -1,11 +1,12 @@
 //! The render pass — a function of `&App` only, so it is proven
 //! against ratatui's `TestBackend` without a terminal.
 //!
-//! Panes: a header, the raw transcript with tail-following scrollback
-//! (stage 4.3 turns this into a markdown pane with its own refined
-//! auto-scroll), the status/state line (stage 4.4 turns the status
-//! area into the full gauge bar), and the composer (stage 4.2: the
-//! `ratatui-textarea` widget with key hints in its title).
+//! Panes: a header, the transcript rendered as markdown (stage 4.3:
+//! `tui-markdown`, code blocks keep their language tag, tail-following
+//! scrollback that pauses while the user is paged up), the
+//! status/state line (stage 4.4 turns the status area into the full
+//! gauge bar), and the composer (stage 4.2: the `ratatui-textarea`
+//! widget with key hints in its title).
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Margin};
@@ -36,19 +37,23 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("iris chat"));
     frame.render_widget(header, chunks[0]);
 
-    // Scrollback: the pane follows the tail (offset 0) until the user
-    // pages up; overshooting past the head clamps at the top.
+    // Scrollback: the pane renders assistant text as markdown (4.3),
+    // so scroll math counts the *rendered* lines — markdown reflow
+    // changes them. The view follows the tail (offset 0) until the
+    // user pages up; overshooting past the head clamps at the top.
     let view_height = chunks[1].height.saturating_sub(2); // borders
-    let line_count = app.transcript().lines().count() as u16;
+    let text = crate::markdown::transcript(app.transcript());
+    let line_count = text.lines.len() as u16;
     let max_top = line_count.saturating_sub(view_height);
     let top = max_top.saturating_sub(app.scroll_from_bottom());
-    let transcript = Paragraph::new(app.transcript())
+    let transcript = Paragraph::new(text)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title("transcript — PgUp/PgDn pages history"),
         )
-        .wrap(Wrap { trim: true })
+        // `trim: false` — code blocks keep their indentation.
+        .wrap(Wrap { trim: false })
         .scroll((top, 0));
     frame.render_widget(transcript, chunks[1]);
 
@@ -72,16 +77,22 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
 #[cfg(test)]
 mod tests {
     use iris_core::metrics::TurnMetrics;
+    use ratatui::style::Color;
 
     use super::*;
     use crate::events::AppEvent;
 
-    /// The rendered frame as plain text, row by row.
-    fn rendered(app: &App) -> String {
+    /// One drawn frame's buffer, for text *and* style assertions.
+    fn buffer_of(app: &App) -> ratatui::buffer::Buffer {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).expect("test terminal");
         terminal.draw(|frame| render(frame, app)).expect("draw");
-        let buffer = terminal.backend().buffer();
+        terminal.backend().buffer().clone()
+    }
+
+    /// The rendered frame as plain text, row by row.
+    fn rendered(app: &App) -> String {
+        let buffer = buffer_of(app);
         let mut text = String::new();
         for y in 0..buffer.area.height {
             for x in 0..buffer.area.width {
@@ -152,21 +163,73 @@ mod tests {
     #[test]
     fn scrollback_follows_the_tail_and_pages_up_into_history() {
         let mut app = App::new();
+        // A fenced block: markdown preserves its lines verbatim (soft
+        // line breaks in prose reflow to spaces) — the same shape
+        // real tool output takes in the transcript.
+        app.handle(AppEvent::Delta("```\n".into()));
         for i in 0..40 {
             app.handle(AppEvent::Delta(format!("L{i}\n")));
         }
+        app.handle(AppEvent::Delta("```\n".into()));
 
         // The pane shows the newest output, not the oldest.
         let text = rendered(&app);
         assert!(!text.contains("L0"), "the view follows the tail:\n{text}");
         assert!(text.contains("L39"), "the newest line is visible:\n{text}");
 
-        // Three pages up reaches the head of a 40-line transcript
-        // (15 visible rows).
+        // Three pages up reaches the head of a 42-line block
+        // (12 visible rows).
         for _ in 0..3 {
             app.page_up();
         }
         let text = rendered(&app);
         assert!(text.contains("L0"), "paging up reaches history:\n{text}");
+    }
+
+    #[test]
+    fn transcript_renders_as_marked_up_markdown() {
+        let mut app = App::new();
+        app.handle(AppEvent::Delta(
+            "# Title\n\nSome **bold** text.\n\n```rust\nfn main() {}\n```\n".into(),
+        ));
+        let text = rendered(&app);
+        assert!(text.contains("Title"), "heading text survives:\n{text}");
+        assert!(
+            text.contains("```rust"),
+            "the code fence keeps its language tag:\n{text}"
+        );
+        assert!(text.contains("fn main() {}"), "code content:\n{text}");
+        assert!(
+            !text.contains("**"),
+            "markdown markers are consumed by the parser, not shown raw:\n{text}"
+        );
+    }
+
+    #[test]
+    fn code_blocks_are_styled_as_code() {
+        let mut app = App::new();
+        app.handle(AppEvent::Delta("```\nlet x = 1;\n```\n".into()));
+        let buffer = buffer_of(&app);
+
+        // Find the code line and check it carries the code style
+        // (white on black), not the default paragraph style.
+        let mut found = false;
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
+                .collect();
+            if let Some(pos) = row.find("let x") {
+                let cell = buffer
+                    .cell((pos as u16, y))
+                    .expect("the cell holding the code");
+                assert_eq!(
+                    cell.style().bg,
+                    Some(Color::Black),
+                    "the code line is styled as code"
+                );
+                found = true;
+            }
+        }
+        assert!(found, "the code line is rendered");
     }
 }

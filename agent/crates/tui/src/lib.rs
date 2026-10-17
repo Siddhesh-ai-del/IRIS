@@ -20,6 +20,7 @@
 
 pub mod app;
 pub mod events;
+pub mod markdown;
 pub mod term;
 pub mod ui;
 

@@ -8,7 +8,8 @@
 //! history recall (Up/Down at the composer's edges), locally
 //! dispatched [`COMMANDS`] (`/help` `/quit` `/clear` — never sent to
 //! the model), bracketed-paste insertion, and a scrollback distance
-//! ([`PAGE_LINES`] per page) that fresh output re-anchors to the tail.
+//! ([`PAGE_LINES`] per page) the transcript pane pauses while the
+//! user is reading (4.3).
 //!
 //! The three states the plan names, and what they mean here:
 //!
@@ -212,10 +213,13 @@ impl App {
             AppEvent::Delta(text) => {
                 self.transcript.push_str(&text);
                 self.state = AppState::Streaming;
-                // Fresh output re-anchors the scrollback to the tail —
-                // the view follows what is happening (4.3's auto-scroll
-                // refines this against manual paging).
-                self.scroll_from_bottom = 0;
+                // Auto-scroll (4.3): at the tail (`scroll_from_bottom`
+                // == 0) the view follows new output by construction;
+                // while the user is paged up, output must NOT yank
+                // them back — the offset is left alone. Limitation:
+                // the parked view still slides toward the tail as
+                // output accumulates (a true pin needs the rendered
+                // height the render pass owns); see the module docs.
             }
             AppEvent::ToolStart { id, name } => {
                 self.state = AppState::Streaming;
@@ -678,7 +682,7 @@ mod tests {
         assert_eq!(app.scroll_from_bottom(), 0, "clamped at the tail");
 
         app.handle(AppEvent::Delta("more\n".into()));
-        assert_eq!(app.scroll_from_bottom(), 0, "fresh output re-anchors");
+        assert_eq!(app.scroll_from_bottom(), 0, "still following at the tail");
     }
 
     #[test]
@@ -695,5 +699,31 @@ mod tests {
         assert!(app.handle_key(key(KeyCode::Enter)).is_some());
         app.handle_paste("dropped");
         assert_eq!(app.prompt(), "");
+    }
+
+    #[test]
+    fn manual_scroll_is_not_yanked_back_by_new_output() {
+        let mut app = App::new();
+        for i in 0..30 {
+            app.handle(AppEvent::Delta(format!("para {i}\n\n")));
+        }
+        app.handle_key(key(KeyCode::PageUp));
+        assert_eq!(app.scroll_from_bottom(), PAGE_LINES);
+
+        // 4.3: while the reader is paged up, streamed output must not
+        // yank the view back to the tail.
+        app.handle(AppEvent::Delta("streamed while reading\n".into()));
+        assert_eq!(
+            app.scroll_from_bottom(),
+            PAGE_LINES,
+            "manual scroll pauses the auto-scroll"
+        );
+
+        // Paging back to the tail resumes following.
+        app.page_down();
+        app.page_down();
+        assert_eq!(app.scroll_from_bottom(), 0);
+        app.handle(AppEvent::Delta("and we follow again\n".into()));
+        assert_eq!(app.scroll_from_bottom(), 0, "following resumes");
     }
 }

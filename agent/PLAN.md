@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.3 (streaming markdown pane — `tui-markdown`, code blocks, auto-scroll that pauses on manual scroll)
-- **Current phase:** 4 — TUI (in progress); next: 4.3
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15)
+- **Next action:** Stage 4.4 (status bar with wedge #1 gauges — cache-hit %, cost, TTFT, tok/s, model, turn #, token budget bar)
+- **Current phase:** 4 — TUI (in progress); next: 4.4
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -497,9 +497,22 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   output re-anchors to the tail). Composer pane grew to 6 rows so multiline drafts are visible.
   7 new tests → 318/318 green, clippy/fmt clean.
 
-- [ ] **4.3 Streaming markdown pane** (1h) — `tui-markdown` incremental render, code blocks with
+- [x] **4.3 Streaming markdown pane** (1h) — `tui-markdown` incremental render, code blocks with
   language tag, auto-scroll that doesn't fight the user (pause on manual scroll).
-  Risk: Medium (re-render cost/flicker — KQ2.5) · Depends: 4.2
+  Risk: Medium (re-render cost/flicker — KQ2.5) · Depends: 4.2 — **Done 2026-10-17.** RED = 3
+  failures (1 app, 2 ui) → GREEN. `tui-markdown` 0.3.11 targets `ratatui-core ^0.1` (same split
+  family as 4.2's ratatui 0.30 bump — types unify, single `ratatui-core` in tree). Built with
+  `default-features = false`: the `highlight-code` (syntect) default pulls a heavy syntax set and
+  swaps the deterministic code styles — the plan's requirement is the fence's language tag
+  (```` ```lang ````), which the plain path renders. Markdown contract: only assistant text enters
+  the transcript (`Delta` never carries tool output), so the whole buffer parses; prose soft
+  breaks reflow to spaces — the scrollback fixture moved into a fenced block (lines preserved
+  verbatim), pane wrap is `trim: false` so code indentation survives. Auto-scroll: fresh output no
+  longer re-anchors a paged-up reader (offset untouched; following resumes at the tail); parked
+  view still slides as output accumulates — true pinning needs the render-pass height, documented
+  as a seam. Scroll math counts *rendered* lines (markdown reflow changes them). Cost: per-frame
+  re-parse (pulldown-cmark is linear; transcripts are human-scale; caching seam documented for
+  KQ2.5). 6 new tests (1 app, 2 ui, 3 markdown module) → 324/324 green, clippy/fmt clean.
 
 - [ ] **4.4 Status bar with wedge #1 gauges** (1h) — cache-hit %, cost, TTFT, tok/s, model, turn #,
   token budget bar; turns red on budget/cost threshold. Risk: Low · Depends: 3.4, 4.1
