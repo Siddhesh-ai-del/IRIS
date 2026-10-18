@@ -47,8 +47,15 @@ released software.
   for every tool call; headless runs fail closed.
 - ✅ **Crash-safe sessions** — append-only, versioned JSONL transcripts with
   resume and a rebuildable local index (Phase 2).
+- ✅ **Cache-first prompt assembly** — byte-stable prefix assembly, real token
+  counts, and per-turn metrics (cache hit %, cost, TTFT, tok/s) recorded for
+  every turn (Phase 3).
+- ✅ **Interactive TUI** — `iris chat`: a streaming shell with a multiline
+  composer (history, `/commands`, paste) and a markdown transcript pane
+  (Phase 4, in progress).
 - 📋 **Live cost gauges** — cache hit %, cost, TTFT, and tokens/sec in the status bar.
-- 📋 **Interactive TUI** — streaming markdown, diff views, and a permission prompt you can actually trust.
+- 📋 **Diff review & permission widget** — diff views and an interactive
+  allow / deny / always-allow prompt (Phase 4).
 - 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
 - 📋 **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
 - 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
@@ -56,13 +63,16 @@ released software.
 
 ## Project status
 
-**IRIS is pre-release and under active development.** Phases 0, 1 and 2 of the
-[implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered
-configuration, the OpenRouter client with SSE streaming, five tools behind a
-config-backed permission gate, the headless agent loop, and durable sessions
-(crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
-index) have landed and are runnable via `iris run -p` — all under
-test-driven development (324 tests). There are no versioned releases yet.
+**IRIS is pre-release and under active development.** Phases 0 through 3 of the
+[implementation plan](agent/PLAN.md) are complete and Phase 4 (the terminal UI)
+is underway: the Cargo workspace, layered configuration, the OpenRouter client
+with SSE streaming, five tools behind a config-backed permission gate, the
+headless agent loop, durable sessions (crash-safe transcripts, `sessions list` /
+`sessions resume`, a rebuildable index), and cache-first prompt assembly with
+per-turn cost metrics have all landed. The interactive shell `iris chat` is
+usable today — streaming markdown transcript, multiline composer with history —
+with the status bar and permission widget still to come. Everything is built
+under test-driven development (324 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -73,8 +83,8 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 0 | Toolchain and workspace skeleton | ✅ Complete |
 | 1 | Headless agent core loop (providers, streaming, tools, permissions) | ✅ Complete |
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
-| 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | 🚧 In progress |
-| 4 | Terminal UI (composer, streaming pane, status bar, diff review) | Planned |
+| 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
+| 4 | Terminal UI (composer, streaming pane, status bar, diff review) | 🚧 In progress |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
@@ -97,16 +107,19 @@ cd IRIS/agent
 cargo build --release
 ```
 
-Then export your OpenRouter key and try the headless mode:
+Then export your OpenRouter key and try it:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-…   # never read from a config file
 ./target/release/iris doctor
 ./target/release/iris run -p "list the files here and summarize what this project is"
+./target/release/iris chat              # the interactive shell (Phase 4)
 ```
 
 `iris run -p` streams model text to stdout, tool events to stderr, and exits with
 the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).
+`iris chat` opens the interactive shell; the status bar and the interactive
+permission prompt are still landing (stages 4.4 / 4.5).
 
 ## Architecture
 
@@ -115,9 +128,11 @@ IRIS is a single Rust binary organized as a Cargo workspace under `agent/`:
 - **`iris-core`** — provider-agnostic agent loop, tool registry, permission gate,
   session store, prompt assembly, and metrics. Fully headless: no TUI code in the core.
 - **`iris` (CLI)** — argument parsing, configuration layering (defaults → file →
-  environment → flags), and the headless runner.
-- **TUI** — a thin presentation layer driven by events emitted from the core
-  (planned, Phase 4).
+  environment → flags), the headless runner, and the interactive shell plumbing.
+- **`iris-tui` (TUI)** — a thin presentation layer driven by events emitted from
+  the core: a pure app state machine, a markdown transcript pane, and a
+  multiline composer (Phase 4 in progress — status bar and permission widget
+  still to come).
 
 Provider access today is OpenRouter's OpenAI-compatible API with a hand-rolled SSE
 client. The transcript format is a versioned, append-only JSONL schema, documented
