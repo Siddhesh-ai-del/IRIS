@@ -531,6 +531,20 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 - [ ] **4.5 Permission prompt widget** (1h) — command/diff preview +
   `y / n / always-allow (session) / always-allow (rule)`; persisted rules write back to config
   (targets claude-code #11380 "always allow ignored"). Risk: Low · Depends: 4.3, 1.9
+  **Design recon done 2026-10-18 (no code yet):** blocking `PromptingResolver` in new
+  `crates/tui/src/ask.rs` implementing `AskResolver` — checks an in-memory session-rules map
+  first (no prompt), else sends `AppEvent::PermissionRequested{id,name,detail}` and blocks on an
+  answer channel; disconnect → `Deny` (fail closed). `AppEvent::PermissionAnswered` gains
+  `note: Option<String>` (one test construction site to update; note lands in status — "rule
+  saved" / "degraded to session"). App gains `PermissionAnswer{Allow,Deny,AllowSession,AllowRule}`
+  + `answer`/`answer_in_flight` fields + `take_answer()`; prompt keys `y/n/a/r` are modal while
+  pending (ctrl-c still quits first); `spin()` forwards the answer to the resolver, which applies
+  the session rule, persists `AllowRule` via new `iris_core::config::persist_permission(path,
+  tool, decision)` (toml read-modify-write, `create_dir_all`, tmp+rename — `tempfile` already a
+  core dev-dep), then emits `PermissionAnswered`. `Chat` carries `config_path: Option<PathBuf>`
+  from the CLI. Popup widget: centered rect, preview = `run_command` → `command` field,
+  `write_file`/`apply_patch` → path + body, else pretty JSON; key-hint line y/n/a/r. RED ≈ 12
+  (2 app, 2 ui, 5 ask, 3 config).
 
 - [ ] **4.6 Diff view** (1–2h) — `similar` hunk rendering of pending file edits, accept/reject per
   hunk feeding back to the loop; `insta` TUI snapshots via `TestBackend`.
