@@ -27,7 +27,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use iris_core::agent_loop::{self, Recorded, RunError};
+use iris_core::agent_loop::{self, LoopOutcome, Recorded, RunError};
 use iris_core::provider::Provider;
 use iris_core::session::schema::Event as TranscriptEvent;
 use iris_core::session::writer::TranscriptWriter;
@@ -94,7 +94,14 @@ where
         .map_err(|err| format!("cannot start runtime: {err}"))?;
 
     let (tx, rx) = mpsc::channel::<AppEvent>();
-    spin(chat, App::new(), rx, tx, &rt, &mut terminal)
+    // The gauges' model / turn cap / token budget come from the run's
+    // loop options (4.4).
+    let app = App::with_run_config(
+        &chat.opts.model,
+        chat.opts.max_turns,
+        chat.opts.max_tokens_budget,
+    );
+    spin(chat, app, rx, tx, &rt, &mut terminal)
 }
 
 /// The frame cycle: drain → draw → poll input. The only loop that
@@ -235,9 +242,15 @@ fn spawn_run<P>(
         )
         .await;
         let final_event = match outcome {
-            Ok(outcome) => AppEvent::RunEnded {
-                summary: events::summarize_outcome(&outcome),
-            },
+            Ok(outcome) => {
+                let summary = events::summarize_outcome(&outcome);
+                let usage = match &outcome {
+                    LoopOutcome::Completed { usage, .. }
+                    | LoopOutcome::MaxTurns { usage, .. }
+                    | LoopOutcome::BudgetExceeded { usage, .. } => usage.clone(),
+                };
+                AppEvent::RunEnded { summary, usage }
+            }
             Err(err) => AppEvent::Error {
                 message: err.to_string(),
             },

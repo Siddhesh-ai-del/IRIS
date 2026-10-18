@@ -116,6 +116,7 @@ fn loop_events_cross_the_channel_into_the_app_in_order() {
     // What the shell synthesizes after the loop returns.
     tx.send(AppEvent::RunEnded {
         summary: "completed in 1 turns (12 tokens)".into(),
+        usage: Default::default(),
     })
     .expect("channel open");
 

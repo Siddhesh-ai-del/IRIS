@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.4 (status bar with wedge #1 gauges — cache-hit %, cost, TTFT, tok/s, model, turn #, token budget bar)
-- **Current phase:** 4 — TUI (in progress); next: 4.4
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17)
+- **Next action:** Stage 4.5 (permission prompt widget — command/diff preview, y / n / always-allow, persisted rules)
+- **Current phase:** 4 — TUI (in progress); next: 4.5
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -514,8 +514,19 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   re-parse (pulldown-cmark is linear; transcripts are human-scale; caching seam documented for
   KQ2.5). 6 new tests (1 app, 2 ui, 3 markdown module) → 324/324 green, clippy/fmt clean.
 
-- [ ] **4.4 Status bar with wedge #1 gauges** (1h) — cache-hit %, cost, TTFT, tok/s, model, turn #,
-  token budget bar; turns red on budget/cost threshold. Risk: Low · Depends: 3.4, 4.1
+- [x] **4.4 Status bar with wedge #1 gauges** (1h) — cache-hit %, cost, TTFT, tok/s, model, turn #,
+  token budget bar; turns red on budget/cost threshold. Risk: Low · Depends: 3.4, 4.1 —
+  **Done 2026-10-18.** RED = 3 failures (1 app, 2 ui) → GREEN. `AppEvent::RunEnded` now carries the
+  run's cumulative `Usage` (total match over all three `LoopOutcome` variants) — the budget gauge's
+  source. `App::with_run_config(model, max_turns, max_tokens_budget)` injects the run identity from
+  `LoopOptions` at the shell (CLI side of the boundary, matching the layering); session cost
+  accumulates *reported* turn costs (unreported adds nothing — no fabricated zero). The status
+  block is two rows: `[State] status` on row A, the gauge bar on row B — `model · turn n/max ·
+  tok used/budget ▓▓░░░░ · $cost · TTFT · tok/s · cache %`, with the budget segment (digits +
+  six-cell bar) red when the last run met/passed its token budget. Honest notes: no cost-cap
+  config knob exists (3.x shipped a token budget only), so cost displays but is not a red
+  trigger; on frames narrower than ~75 cols the trailing cache % truncates gracefully (asserted
+  through app state). 3 new tests → 327/327 green, clippy/fmt clean.
 
 - [ ] **4.5 Permission prompt widget** (1h) — command/diff preview +
   `y / n / always-allow (session) / always-allow (rule)`; persisted rules write back to config

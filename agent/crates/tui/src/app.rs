@@ -95,6 +95,17 @@ pub struct App {
     /// Transcript scrollback distance from the tail, in lines — 0
     /// follows new output (4.2).
     scroll_from_bottom: u16,
+    /// Gauge identity (stage 4.4): the model id every run uses, its
+    /// turn cap, and its per-run token budget.
+    model: String,
+    max_turns: u32,
+    max_tokens_budget: u64,
+    /// Cumulative session cost in USD (4.4) — summed over reported
+    /// turn costs; unreported costs add nothing (never a fake zero).
+    session_cost: f64,
+    /// The last finished run's `total_tokens` (4.4) — what the budget
+    /// gauge compares against [`App::max_tokens_budget`].
+    run_tokens: u64,
     /// A loop task is in flight.
     running: bool,
     /// The user asked to quit.
@@ -123,10 +134,31 @@ impl App {
             history_cursor: None,
             draft: String::new(),
             scroll_from_bottom: 0,
+            model: String::new(),
+            max_turns: 0,
+            max_tokens_budget: 0,
+            session_cost: 0.0,
+            run_tokens: 0,
             running: false,
             quit: false,
             pending: None,
             last_metrics: None,
+        }
+    }
+
+    /// A fresh app whose gauges know the run's identity (model, turn
+    /// cap, token budget — from `LoopOptions` at the shell, stage
+    /// 4.4).
+    pub fn with_run_config(
+        model: impl Into<String>,
+        max_turns: u32,
+        max_tokens_budget: u64,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            max_turns,
+            max_tokens_budget,
+            ..Self::new()
         }
     }
 
@@ -168,6 +200,37 @@ impl App {
     /// The most recent turn's metrics.
     pub fn last_metrics(&self) -> Option<&TurnMetrics> {
         self.last_metrics.as_ref()
+    }
+
+    /// The model id every run uses (stage 4.4).
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// The per-run turn cap.
+    pub fn max_turns(&self) -> u32 {
+        self.max_turns
+    }
+
+    /// The per-run token budget the bar measures against.
+    pub fn max_tokens_budget(&self) -> u64 {
+        self.max_tokens_budget
+    }
+
+    /// Cumulative session cost in USD (only reported costs count).
+    pub fn session_cost(&self) -> f64 {
+        self.session_cost
+    }
+
+    /// The last finished run's total tokens.
+    pub fn run_tokens(&self) -> u64 {
+        self.run_tokens
+    }
+
+    /// Whether the last run met or passed its token budget — the
+    /// gauge bar's red state (stage 4.4).
+    pub fn over_budget(&self) -> bool {
+        self.max_tokens_budget > 0 && self.run_tokens >= self.max_tokens_budget
     }
 
     /// How far the transcript view is paged up from the tail, in
@@ -243,6 +306,11 @@ impl App {
                 self.status = format!("cache-bust: {what} changed");
             }
             AppEvent::Metrics(metrics) => {
+                // Session-scope cost accumulates over reported turn
+                // costs — an unreported cost adds nothing (4.4).
+                if let Some(cost) = metrics.cost_usd {
+                    self.session_cost += cost;
+                }
                 self.last_metrics = Some(metrics);
                 self.state = AppState::Streaming;
             }
@@ -254,10 +322,13 @@ impl App {
                 self.pending = None;
                 self.state = AppState::Streaming;
             }
-            AppEvent::RunEnded { summary } => {
+            AppEvent::RunEnded { summary, usage } => {
                 self.state = AppState::Idle;
                 self.running = false;
                 self.status = summary;
+                // What the budget gauge compares against the run's
+                // token budget (4.4).
+                self.run_tokens = usage.total_tokens;
             }
             AppEvent::Error { message } => {
                 self.state = AppState::Idle;
@@ -411,6 +482,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use iris_core::types::Usage;
+
     use super::*;
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -474,6 +547,7 @@ mod tests {
 
         app.handle(AppEvent::RunEnded {
             summary: "completed in 1 turns (9 tokens)".into(),
+            usage: Usage::default(),
         });
         assert_eq!(app.state(), AppState::Idle);
         assert!(!app.is_running());
@@ -601,11 +675,13 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Enter)), Some("one".into()));
         app.handle(AppEvent::RunEnded {
             summary: "done".into(),
+            usage: Usage::default(),
         });
         type_text(&mut app, "two");
         assert_eq!(app.handle_key(key(KeyCode::Enter)), Some("two".into()));
         app.handle(AppEvent::RunEnded {
             summary: "done".into(),
+            usage: Usage::default(),
         });
 
         app.handle_key(key(KeyCode::Up));
@@ -725,5 +801,63 @@ mod tests {
         assert_eq!(app.scroll_from_bottom(), 0);
         app.handle(AppEvent::Delta("and we follow again\n".into()));
         assert_eq!(app.scroll_from_bottom(), 0, "following resumes");
+    }
+
+    #[test]
+    fn gauges_accumulate_cost_and_track_the_run_budget() {
+        let mut app = App::with_run_config("openai/gpt-4o-mini", 10, 1_000);
+        assert_eq!(app.model(), "openai/gpt-4o-mini");
+        assert_eq!(app.max_turns(), 10);
+        assert_eq!(app.max_tokens_budget(), 1_000);
+        assert_eq!(app.session_cost(), 0.0);
+        assert_eq!(app.run_tokens(), 0);
+        assert!(!app.over_budget());
+
+        app.handle(AppEvent::Metrics(TurnMetrics {
+            turn: 1,
+            ttft_ms: Some(10),
+            tokens_per_sec: 1.0,
+            cache_hit_pct: None,
+            cost_usd: Some(0.25),
+        }));
+        app.handle(AppEvent::Metrics(TurnMetrics {
+            turn: 2,
+            ttft_ms: Some(20),
+            tokens_per_sec: 2.0,
+            cache_hit_pct: Some(50.0),
+            cost_usd: Some(0.75),
+        }));
+        assert!(
+            (app.session_cost() - 1.0).abs() < 1e-9,
+            "session cost accumulates reported turn costs, got {}",
+            app.session_cost()
+        );
+        assert_eq!(app.last_metrics().map(|m| m.turn), Some(2));
+
+        app.handle(AppEvent::RunEnded {
+            summary: "completed in 2 turns".into(),
+            usage: Usage {
+                total_tokens: 600,
+                ..Usage::default()
+            },
+        });
+        assert_eq!(
+            app.run_tokens(),
+            600,
+            "budget usage comes from the run's cumulative usage"
+        );
+        assert!(!app.over_budget(), "600 of 1000 is under budget");
+
+        app.handle(AppEvent::RunEnded {
+            summary: "stopped: token budget exceeded".into(),
+            usage: Usage {
+                total_tokens: 1_200,
+                ..Usage::default()
+            },
+        });
+        assert!(app.over_budget(), "1200 of 1000 is over budget");
+
+        // An unconfigured app (no shell plumbing) renders no budget.
+        assert!(!App::new().over_budget(), "budget 0 never goes red");
     }
 }

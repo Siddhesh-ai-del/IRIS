@@ -7,6 +7,7 @@
 
 use iris_core::agent_loop::{LoopEvent, LoopOutcome};
 use iris_core::metrics::TurnMetrics;
+use iris_core::types::Usage;
 
 /// One event for the app. Channel-safe (fully owned).
 #[derive(Clone, Debug, PartialEq)]
@@ -37,8 +38,9 @@ pub enum AppEvent {
     },
     /// The user answered — the loop resumes.
     PermissionAnswered,
-    /// The run stopped on its own terms.
-    RunEnded { summary: String },
+    /// The run stopped on its own terms — with its cumulative usage
+    /// (the stage-4.4 budget gauge reads `total_tokens` from it).
+    RunEnded { summary: String, usage: Usage },
     /// The run died (provider or transcript failure).
     Error { message: String },
 }
