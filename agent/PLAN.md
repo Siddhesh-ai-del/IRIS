@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 5.3 (telemetry-off guarantee — no outbound host except configured LLM providers)
-- **Current phase:** 5 — Privacy (in progress); next: 5.3
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19)
+- **Next action:** Stage 6.1 (git-first checkpoints — `checkpoint create/list/restore`)
+- **Current phase:** 6 — Parity Features (next: 6.1; Phase 5 complete: 5.1–5.3)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -627,9 +627,25 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   original — so the bytes `write_all`/`sync_all` receive are redacted by construction.
   4 new tests → 370/370 green, clippy/fmt clean, secret-scan clean.
 
-- [ ] **5.3 Telemetry-off guarantee** (0.5h) — no outbound host except configured LLM providers;
+- [x] **5.3 Telemetry-off guarantee** (0.5h) — no outbound host except configured LLM providers;
   test asserts zero extra sockets; `doctor` shows exactly what leaves the machine.
   Risk: Low · Depends: 1.10
+  Done 2026-10-19 — two pins in `crates/core/tests/telemetry_off.rs`. Runtime: a full
+  scripted run (streaming + real `read_file`) against httpmock — exactly the two
+  scripted calls hit the configured host, and every socket the run opened drains back
+  to the harness's own listener footprint within 3s (measured per-fd from
+  `/proc/self/fd`; httpmock pools its servers by design, so the harness baseline is
+  subtracted — the agent adds nothing that lingers). Dependency graph: the workspace
+  may not grow a second HTTP client (hyper/ureq/curl/… — reqwest, core-only, is the
+  only network stack) or a telemetry SDK (opentelemetry/sentry/…), asserted by
+  parsing every crate's Cargo.toml. `doctor` gains `egress:` (names the resolved
+  provider host — the only host iris contacts) and `telemetry: none` lines.
+  Validated live against the real OpenRouter API with a free model
+  (nvidia/nemotron-3.5-lightning:free): real streaming, real tool call, $0.00 cost —
+  and the transcript showed `AWS_ACCESS_KEY_ID=[REDACTED:aws-access-key]` in both the
+  user prompt and the tool-call input while the on-disk file kept the raw value the
+  user asked for. 3 new tests → 373/373 green, clippy/fmt clean, secret-scan clean.
+  **Phase 5 complete (5.1–5.3).**
 
 ### Phase 6 — Parity Features (5 stages, ~5h)
 

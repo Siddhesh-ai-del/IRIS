@@ -72,9 +72,8 @@ released software.
 
 ## Project status
 
-**IRIS is pre-release and under active development.** Phases 0 through 4 of the
-[implementation plan](agent/PLAN.md) are complete, and privacy work has started:
-the Cargo workspace, layered configuration, the OpenRouter client with SSE
+**IRIS is pre-release and under active development.** Phases 0 through 5 of the
+[implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered configuration, the OpenRouter client with SSE
 streaming, five tools behind a config-backed permission gate, the headless agent
 loop, durable sessions (crash-safe transcripts, `sessions list` / `sessions
 resume`, a rebuildable index), and cache-first prompt assembly with per-turn cost
@@ -85,9 +84,14 @@ rules persisted to config), and a hunk diff view where file edits can be
 accepted or rejected per hunk (a partial accept runs only the accepted hunks).
 Secrets are redacted at write time: every transcript line passes a redactor
 (fixed-shape key patterns, credential assignments, private-key blocks, an
-entropy heuristic) before it is fsynced. Next up: stage 5.3 (telemetry-off
-guarantee). Everything is built under test-driven development (370 tests).
-There are no versioned releases yet.
+entropy heuristic) before it is fsynced, and the telemetry-off guarantee is
+tested: a full run opens sockets only for the configured provider and leaves
+none behind, the dependency graph may not grow a second HTTP client or a
+telemetry SDK, and `iris doctor` spells out exactly what leaves the machine.
+The whole privacy stack has been validated live against the real OpenRouter
+API with a free model — real streaming, a real tool call, $0.00 cost. Next
+up: Phase 6 (starting with git-first checkpoints). Everything is built under
+test-driven development (373 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -100,8 +104,8 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
-| 5 | Privacy (secret redaction, telemetry-off guarantee) | 🔵 In progress (5.2) |
-| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
+| 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
+| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.1) |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,

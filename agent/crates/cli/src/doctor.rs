@@ -48,6 +48,11 @@ pub fn run(base_url_flag: Option<&str>, env: &HashMap<String, String>) -> i32 {
         describe_base_url_source(base_url_flag, env, file_text.as_deref())
     );
     println!(
+        "  egress            : {} — the only host iris contacts",
+        config.provider_base_url
+    );
+    println!("  telemetry         : none — no analytics, no update checks, no crash reporting");
+    println!(
         "  API key           : {}",
         match config::resolve_api_key(env) {
             Some(_) => "set via OPENROUTER_API_KEY (value redacted)",

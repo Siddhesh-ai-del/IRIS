@@ -78,6 +78,27 @@ fn doctor_shows_effective_base_url_from_env_layer() {
 }
 
 #[test]
+fn doctor_spells_out_the_egress_policy() {
+    let mut cmd = iris();
+    cmd.arg("doctor")
+        .env("IRIS_CONFIG", "/nonexistent/iris-config.toml")
+        .env_remove("OPENROUTER_API_KEY");
+    let stdout = stdout_of(&mut cmd);
+
+    assert!(stdout.contains("egress"), "egress line missing: {stdout}");
+    // The egress line names the configured host — exactly what leaves
+    // the machine — and telemetry is declared off, explicitly.
+    assert!(
+        stdout.contains("https://openrouter.ai/api/v1"),
+        "egress line must name the provider host: {stdout}"
+    );
+    assert!(
+        stdout.to_lowercase().contains("telemetry") && stdout.contains("none"),
+        "telemetry-off declaration missing: {stdout}"
+    );
+}
+
+#[test]
 fn help_lists_all_stage_0_2_subcommands() {
     let out = iris().arg("--help").output().expect("iris --help runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
