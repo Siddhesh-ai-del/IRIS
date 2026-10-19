@@ -14,7 +14,7 @@
 //! env and flag layers carry scalars, not maps.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -149,6 +149,71 @@ pub fn config_file_path(env: &HashMap<String, String>) -> Option<PathBuf> {
         return Some(xdg.join("iris").join("config.toml"));
     }
     non_empty("HOME").map(|home| home.join(".config").join("iris").join("config.toml"))
+}
+
+/// Why a config **write-back** failed (stage 4.5: "always allow"
+/// rules persisted to the config file).
+#[derive(Debug)]
+pub enum PersistError {
+    /// The existing file is not valid TOML — it is left untouched,
+    /// because overwriting a config we cannot read would lose settings.
+    Corrupt(String),
+    /// The file could not be written (directory creation, write, or
+    /// atomic rename failed).
+    Io(String),
+}
+
+impl std::fmt::Display for PersistError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PersistError::Corrupt(err) => write!(f, "config is not valid TOML: {err}"),
+            PersistError::Io(err) => write!(f, "config write failed: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for PersistError {}
+
+/// Persist one `[permissions]` entry — the stage-4.5 "always allow
+/// (rule)" write-back: read the existing config as a TOML table,
+/// set/overwrite `[permissions].<tool>`, write `config.toml.tmp` and
+/// rename over the original (read-modify-write, so every other
+/// *setting* survives). Creates the parent directory when missing.
+///
+/// Known skeleton caveat: the TOML round-trip **drops comments** from
+/// the rewritten file (the parser does not keep them) — a
+/// comment-preserving write is a listed follow-up, not implemented.
+pub fn persist_permission(path: &Path, tool: &str, decision: Decision) -> Result<(), PersistError> {
+    // Read-modify-write: a config we cannot parse is never
+    // overwritten — that would lose the user's other settings.
+    let mut table = match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str::<toml::Table>(&text)
+            .map_err(|err| PersistError::Corrupt(err.to_string()))?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+        Err(err) => return Err(PersistError::Io(err.to_string())),
+    };
+
+    let permissions = table
+        .entry("permissions")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| PersistError::Corrupt("`permissions` is not a table".into()))?;
+    let name = match decision {
+        Decision::Allow => "allow",
+        Decision::Deny => "deny",
+        Decision::Ask => "ask",
+    };
+    permissions.insert(tool.to_string(), toml::Value::String(name.to_string()));
+
+    let text = toml::to_string(&table).map_err(|err| PersistError::Io(err.to_string()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|err| PersistError::Io(err.to_string()))?;
+    }
+    // Write beside the target, then rename — a crash mid-write leaves
+    // the old config intact.
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, text).map_err(|err| PersistError::Io(err.to_string()))?;
+    std::fs::rename(&tmp, path).map_err(|err| PersistError::Io(err.to_string()))
 }
 
 /// Apply the four configuration layers and validate the result.
@@ -521,5 +586,68 @@ mod tests {
         assert_eq!(gate.check("read_file", "{}"), Decision::Allow);
         assert_eq!(gate.check("list_dir", "{}"), Decision::Allow);
         assert_eq!(gate.check("write_file", "{}"), Decision::Ask);
+    }
+
+    // --- always-allow rule write-back (stage 4.5) -------------------------
+
+    fn table_at(path: &std::path::Path) -> toml::Table {
+        let text = std::fs::read_to_string(path).expect("config written");
+        toml::from_str(&text).expect("written config parses")
+    }
+
+    #[test]
+    fn persist_permission_creates_the_config_when_missing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Parent `iris/` does not exist yet — write-back creates it.
+        let path = dir.path().join("iris").join("config.toml");
+        persist_permission(&path, "run_command", Decision::Allow).expect("persisted");
+        let table = table_at(&path);
+        assert_eq!(
+            table["permissions"]["run_command"].as_str(),
+            Some("allow"),
+            "rule lands under [permissions]"
+        );
+    }
+
+    #[test]
+    fn persist_permission_preserves_every_other_setting() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "max_turns = 42\n\n[permissions]\nread_file = \"allow\"\n",
+        )
+        .expect("seed config");
+
+        persist_permission(&path, "run_command", Decision::Allow).expect("persisted");
+
+        let table = table_at(&path);
+        assert_eq!(table["max_turns"].as_integer(), Some(42), "kept max_turns");
+        assert_eq!(
+            table["permissions"]["read_file"].as_str(),
+            Some("allow"),
+            "kept the other permission"
+        );
+        assert_eq!(
+            table["permissions"]["run_command"].as_str(),
+            Some("allow"),
+            "added the new rule"
+        );
+    }
+
+    #[test]
+    fn persist_permission_overwrites_a_previous_rule() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[permissions]\nrun_command = \"deny\"\n").expect("seed");
+
+        persist_permission(&path, "run_command", Decision::Allow).expect("persisted");
+
+        let table = table_at(&path);
+        assert_eq!(
+            table["permissions"]["run_command"].as_str(),
+            Some("allow"),
+            "deny becomes allow"
+        );
     }
 }

@@ -1379,7 +1379,10 @@ dependencies = [
  "iris-core",
  "ratatui",
  "ratatui-textarea",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "toml",
  "tui-markdown",
 ]
 

@@ -7,15 +7,15 @@
 //!   path — including a panic while drawing — returns the terminal).
 //! - A background tokio task per run: the core loop streams its
 //!   events onto an owned channel ([`AppEvent`]) and records to the
-//!   shared transcript writer.
+//!   shared transcript writer. A permission `ask` posts
+//!   [`AppEvent::PermissionRequested`] and parks the run task on the
+//!   answer channel — the frame cycle never blocks (stage 4.5).
 //! - The frame cycle: **drain** loop events (`try_recv`, never
 //!   blocking), **poll** input with a timeout, **draw** from the `&App`
 //!   snapshot. Nothing in the render path waits on the loop.
 //!
 //! Known 4.x follow-ups (honest gaps of the skeleton):
 //!
-//! - Permissions use `DenyOnAsk`; stage 4.5 swaps in a resolver that
-//!   sends [`AppEvent::PermissionRequested`] and waits for the answer.
 //! - Quitting mid-run cancels the task — the transcript then simply
 //!   has no `session_end`, which is exactly how resume (2.3) detects
 //!   and repairs interrupted runs.
@@ -23,6 +23,7 @@
 //!   the in-memory history; resume's repair covers it only for
 //!   transcript-sourced histories.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -31,7 +32,7 @@ use iris_core::agent_loop::{self, LoopOutcome, Recorded, RunError};
 use iris_core::provider::Provider;
 use iris_core::session::schema::Event as TranscriptEvent;
 use iris_core::session::writer::TranscriptWriter;
-use iris_core::tools::{DenyOnAsk, ToolContext, ToolRegistry};
+use iris_core::tools::{AskResolver, ToolContext, ToolRegistry};
 use iris_core::types::{Message, Role};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -43,7 +44,8 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::app::App;
+use crate::app::{App, PermissionAnswer};
+use crate::ask::PromptingResolver;
 use crate::events::{self, AppEvent};
 use crate::ui;
 
@@ -67,6 +69,10 @@ pub struct Chat<P: Provider + Send + Sync + 'static> {
     /// The system message every run starts from (already recorded in
     /// the transcript by the CLI).
     pub system: Message,
+    /// Where an `always-allow (rule)` answer writes its
+    /// `[permissions]` entry back (stage 4.5); `None` when no config
+    /// file path resolves (rule degrades to session scope).
+    pub config_path: Option<PathBuf>,
 }
 
 /// Run the interactive chat until the user quits. Restores the
@@ -94,6 +100,16 @@ where
         .map_err(|err| format!("cannot start runtime: {err}"))?;
 
     let (tx, rx) = mpsc::channel::<AppEvent>();
+    // The stage-4.5 answer channel: the resolver (loop side) blocks
+    // on its receiver; spin() forwards the user's prompt keys into it.
+    let (answer_tx, answer_rx) = mpsc::channel::<PermissionAnswer>();
+    // One resolver per session, so `always-allow (session)` rules
+    // outlive individual runs (they live inside the resolver).
+    let ask: Arc<dyn AskResolver> = Arc::new(PromptingResolver::new(
+        tx.clone(),
+        answer_rx,
+        chat.config_path.clone(),
+    ));
     // The gauges' model / turn cap / token budget come from the run's
     // loop options (4.4).
     let app = App::with_run_config(
@@ -101,16 +117,19 @@ where
         chat.opts.max_turns,
         chat.opts.max_tokens_budget,
     );
-    spin(chat, app, rx, tx, &rt, &mut terminal)
+    spin(chat, app, rx, tx, answer_tx, ask, &rt, &mut terminal)
 }
 
 /// The frame cycle: drain → draw → poll input. The only loop that
 /// owns the terminal.
+#[allow(clippy::too_many_arguments)] // one natural dependency set, not a growing bag
 fn spin<P>(
     chat: Chat<P>,
     mut app: App,
     rx: Receiver<AppEvent>,
     tx: Sender<AppEvent>,
+    answer_tx: Sender<PermissionAnswer>,
+    ask: Arc<dyn AskResolver>,
     rt: &tokio::runtime::Runtime,
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) -> Result<(), String>
@@ -124,6 +143,7 @@ where
         opts,
         writer,
         system,
+        config_path: _,
     } = chat;
     let writer = Arc::new(Mutex::new(writer));
     let mut history = vec![system];
@@ -160,9 +180,18 @@ where
             continue;
         }
         match event::read().map_err(|err| format!("input read failed: {err}"))? {
-            Event::Paste(text) => app.handle_paste(&text),
+            // While a permission prompt is open the composer stays
+            // closed — pastes would leak into a draft the user cannot
+            // see or send (4.5).
+            Event::Paste(text) if app.pending().is_none() => app.handle_paste(&text),
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                let Some(prompt) = app.handle_key(key) else {
+                let prompt = app.handle_key(key);
+                // A permission answer goes straight to the blocked
+                // resolver — the loop task resumes on it.
+                if let Some(answer) = app.take_answer() {
+                    let _ = answer_tx.send(answer);
+                }
+                let Some(prompt) = prompt else {
                     continue;
                 };
 
@@ -190,6 +219,7 @@ where
                     history.clone(),
                     tx.clone(),
                     Arc::clone(&writer),
+                    Arc::clone(&ask),
                 );
             }
             _ => {} // resize etc. — the next draw covers it
@@ -210,6 +240,7 @@ fn spawn_run<P>(
     messages: Vec<Message>,
     tx: Sender<AppEvent>,
     writer: Arc<Mutex<TranscriptWriter>>,
+    ask: Arc<dyn AskResolver>,
 ) where
     P: Provider + Send + Sync + 'static,
 {
@@ -218,14 +249,11 @@ fn spawn_run<P>(
     let ctx = ctx.clone();
     let opts = opts.clone();
     rt.spawn(async move {
-        // Stage 4.5 swaps DenyOnAsk for a resolver that routes the ask
-        // back through the UI and waits for the answer.
-        let ask = DenyOnAsk;
         let outcome = agent_loop::run_recorded(
             &*provider,
             &registry,
             &ctx,
-            &ask,
+            &*ask,
             &opts,
             messages,
             |event| {

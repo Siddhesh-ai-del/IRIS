@@ -16,13 +16,16 @@
 //!
 //! The CLI (`iris chat`) owns config/session plumbing and hands this
 //! crate already-prepared dependencies — layering matches `iris-core`:
-//! this crate knows nothing about config files or API keys.
+//! this crate never reads config or touches API keys, and its one
+//! config *write* (the stage-4.5 rule write-back) goes through
+//! `iris_core::config` with a path the CLI resolved.
 
 pub mod app;
+pub mod ask;
 pub mod events;
 pub mod markdown;
 pub mod term;
 pub mod ui;
 
-pub use app::{App, AppState, PendingPermission};
+pub use app::{App, AppState, PendingPermission, PermissionAnswer};
 pub use events::AppEvent;

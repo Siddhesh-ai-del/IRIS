@@ -51,12 +51,14 @@ released software.
   counts, and per-turn metrics (cache hit %, cost, TTFT, tok/s) recorded for
   every turn (Phase 3).
 - ✅ **Interactive TUI** — `iris chat`: a streaming shell with a multiline
-  composer (history, `/commands`, paste) and a markdown transcript pane
-  (Phase 4, in progress).
-- ✅ **Live cost gauges** — cache hit %, cost, TTFT, and tokens/sec in the status bar (with model,
-  turn #, and a token budget bar that turns red at/over budget).
-- 📋 **Diff review & permission widget** — diff views and an interactive
-  allow / deny / always-allow prompt (Phase 4).
+  composer (history, `/commands`, paste), a markdown transcript pane, a
+  gauge status bar (model, turn, budget bar, cost, TTFT, tok/s), and the
+  interactive permission prompt (Phase 4).
+- ✅ **Interactive permission prompt** — command/diff preview with
+  `y` / `n` / always-allow scoped to the session or persisted as a
+  `[permissions]` rule in the config file (stage 4.5).
+- 📋 **Diff review** — hunk-level rendering of pending file edits,
+  accept/reject per hunk (Phase 4).
 - 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
 - 📋 **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
 - 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
@@ -71,9 +73,11 @@ with SSE streaming, five tools behind a config-backed permission gate, the
 headless agent loop, durable sessions (crash-safe transcripts, `sessions list` /
 `sessions resume`, a rebuildable index), and cache-first prompt assembly with
 per-turn cost metrics have all landed. The interactive shell `iris chat` is
-usable today — streaming markdown transcript, multiline composer with history —
-with the status bar and permission widget still to come. Everything is built
-under test-driven development (327 tests). There are no versioned releases yet.
+usable today — streaming markdown transcript, multiline composer with history,
+gauge status bar, and the interactive permission prompt (`y` / `n` /
+always-allow, with rules persisted to config). The diff view (stage 4.6) is
+the last Phase 4 piece. Everything is built
+under test-driven development (338 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -119,8 +123,9 @@ export OPENROUTER_API_KEY=sk-or-v1-…   # never read from a config file
 
 `iris run -p` streams model text to stdout, tool events to stderr, and exits with
 the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).
-`iris chat` opens the interactive shell — the interactive permission prompt is
-the last piece still landing (stage 4.5).
+`iris chat` opens the interactive shell — permission asks surface as an
+interactive prompt whose always-allow answers can persist rules back to
+the config file; the diff view (stage 4.6) is the last Phase 4 piece.
 
 ## Architecture
 
@@ -131,9 +136,9 @@ IRIS is a single Rust binary organized as a Cargo workspace under `agent/`:
 - **`iris` (CLI)** — argument parsing, configuration layering (defaults → file →
   environment → flags), the headless runner, and the interactive shell plumbing.
 - **`iris-tui` (TUI)** — a thin presentation layer driven by events emitted from
-  the core: a pure app state machine, a markdown transcript pane, and a
-  multiline composer (Phase 4 in progress — status bar and permission widget
-  still to come).
+  the core: a pure app state machine, a markdown transcript pane, a gauge
+  status bar, and the interactive permission prompt (Phase 4 in progress —
+  the diff view is the remaining stage).
 
 Provider access today is OpenRouter's OpenAI-compatible API with a hand-rolled SSE
 client. The transcript format is a versioned, append-only JSONL schema, documented

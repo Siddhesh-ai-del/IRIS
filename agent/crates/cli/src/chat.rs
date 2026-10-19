@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use iris_core::agent_loop::LoopOptions;
 use iris_core::assembly::SystemBlocks;
+use iris_core::config::config_file_path;
 use iris_core::provider::OpenAiClient;
 use iris_core::session;
 use iris_core::session::schema::Event;
@@ -89,6 +90,7 @@ pub(crate) fn run(
         opts,
         writer,
         system,
+        config_path: config_file_path(env),
     }) {
         Ok(()) => EXIT_COMPLETED,
         Err(message) => {

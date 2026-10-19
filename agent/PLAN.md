@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.5 (permission prompt widget — command/diff preview, y / n / always-allow, persisted rules)
-- **Current phase:** 4 — TUI (in progress); next: 4.5
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18)
+- **Next action:** Stage 4.6 (diff view — `similar` hunk rendering of pending file edits, accept/reject per hunk, `insta` TUI snapshots)
+- **Current phase:** 4 — TUI (in progress); next: 4.6 (last Phase 4 stage)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -528,7 +528,7 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   trigger; on frames narrower than ~75 cols the trailing cache % truncates gracefully (asserted
   through app state). 3 new tests → 327/327 green, clippy/fmt clean.
 
-- [ ] **4.5 Permission prompt widget** (1h) — command/diff preview +
+- [x] **4.5 Permission prompt widget** (1h) — command/diff preview +
   `y / n / always-allow (session) / always-allow (rule)`; persisted rules write back to config
   (targets claude-code #11380 "always allow ignored"). Risk: Low · Depends: 4.3, 1.9
   **Design recon done 2026-10-18 (no code yet):** blocking `PromptingResolver` in new
@@ -545,6 +545,20 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   from the CLI. Popup widget: centered rect, preview = `run_command` → `command` field,
   `write_file`/`apply_patch` → path + body, else pretty JSON; key-hint line y/n/a/r. RED ≈ 12
   (2 app, 2 ui, 5 ask, 3 config).
+  **Done 2026-10-19.** RED = 11 failures (2 app, 1 ui, 5 ask, 3 config) → GREEN. New
+  `crates/tui/src/ask.rs`: blocking `PromptingResolver` (session rules first, else post
+  `PermissionRequested` + block on a std channel; every failure path → `Deny`; `AllowSession`/
+  `AllowRule` insert the in-session rule, `AllowRule` also calls core's new
+  `config::persist_permission` — TOML read-modify-write, `create_dir_all`, tmp+rename).
+  `PermissionAnswered` carries `note: Option<String>` (status line: "rule saved …" or the
+  degraded-to-session note); `Chat` gained `config_path` (CLI resolves via `config_file_path`);
+  the prompt is modal in `handle_key` (`y/n/a/r`, double-press suppressed by
+  `answer_in_flight`, Ctrl-C still quits; `RunEnded`/`Error` clear prompt + stale answer);
+  centered popup previews `command` / path+content / patch / pretty JSON with the key hints,
+  clipped so hints always fit; status row A keeps the one-line ask. Honest caveat: the TOML
+  round-trip **drops comments** from the rewritten config (documented in `persist_permission`;
+  a comment-preserving write is a follow-up). 11 new tests → 338/338 green, clippy/fmt clean.
+  Phase 4: 4.1–4.5 done — only 4.6 (diff view) remains.
 
 - [ ] **4.6 Diff view** (1–2h) — `similar` hunk rendering of pending file edits, accept/reject per
   hunk feeding back to the loop; `insta` TUI snapshots via `TestBackend`.

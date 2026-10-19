@@ -62,8 +62,8 @@ impl AppState {
     }
 }
 
-/// A permission the loop is waiting on (stage 4.5 renders a prompt
-/// from this; the skeleton shows it in the status line).
+/// A permission the loop is waiting on (stage 4.5 renders the popup
+/// prompt from this; the status line keeps a one-line summary).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingPermission {
     /// Tool-call id — the answer must reference it.
@@ -72,6 +72,23 @@ pub struct PendingPermission {
     pub name: String,
     /// What the tool would do (command / diff preview, 4.5).
     pub detail: String,
+}
+
+/// What the user chose at the permission prompt (stage 4.5) — stored
+/// by [`App::handle_key`], taken once by the shell via
+/// [`App::take_answer`] and forwarded to the loop's blocked resolver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionAnswer {
+    /// Run this call only.
+    Allow,
+    /// Refuse this call only.
+    Deny,
+    /// Allow every later ask for this tool in this session (in-memory
+    /// rule — the resolver's session map).
+    AllowSession,
+    /// Allow and persist `[permissions].<tool> = "allow"` back to the
+    /// config file, so future sessions allow it too.
+    AllowRule,
 }
 
 /// The whole UI-facing state of a chat session.
@@ -106,6 +123,13 @@ pub struct App {
     /// The last finished run's `total_tokens` (4.4) — what the budget
     /// gauge compares against [`App::max_tokens_budget`].
     run_tokens: u64,
+    /// The user's answer to the open permission prompt, waiting to be
+    /// forwarded to the resolver (4.5).
+    answer: Option<PermissionAnswer>,
+    /// An answer was sent but the resolver has not acknowledged with
+    /// [`AppEvent::PermissionAnswered`] yet — the prompt keys stay
+    /// swallowed so one press cannot be captured twice.
+    answer_in_flight: bool,
     /// A loop task is in flight.
     running: bool,
     /// The user asked to quit.
@@ -139,6 +163,8 @@ impl App {
             max_tokens_budget: 0,
             session_cost: 0.0,
             run_tokens: 0,
+            answer: None,
+            answer_in_flight: false,
             running: false,
             quit: false,
             pending: None,
@@ -195,6 +221,13 @@ impl App {
     /// The permission being awaited, if any.
     pub fn pending(&self) -> Option<&PendingPermission> {
         self.pending.as_ref()
+    }
+
+    /// Take the pending permission answer, if the user has given one
+    /// (the shell forwards it to the blocked resolver — exactly once).
+    pub fn take_answer(&mut self) -> Option<PermissionAnswer> {
+        // RED stub: handle_key does not capture answers yet (4.5).
+        self.answer.take()
     }
 
     /// The most recent turn's metrics.
@@ -318,9 +351,13 @@ impl App {
                 self.state = AppState::AwaitingPermission;
                 self.pending = Some(PendingPermission { id, name, detail });
             }
-            AppEvent::PermissionAnswered => {
+            AppEvent::PermissionAnswered { note } => {
                 self.pending = None;
                 self.state = AppState::Streaming;
+                self.answer_in_flight = false;
+                if let Some(note) = note {
+                    self.status = note;
+                }
             }
             AppEvent::RunEnded { summary, usage } => {
                 self.state = AppState::Idle;
@@ -329,11 +366,21 @@ impl App {
                 // What the budget gauge compares against the run's
                 // token budget (4.4).
                 self.run_tokens = usage.total_tokens;
+                // A dead run can never leave a modal prompt — or a
+                // captured-but-unsent answer — behind (4.5).
+                self.pending = None;
+                self.answer = None;
+                self.answer_in_flight = false;
             }
             AppEvent::Error { message } => {
                 self.state = AppState::Idle;
                 self.running = false;
                 self.status = message;
+                // Same guarantee as RunEnded: the prompt closes with
+                // the run that asked for it.
+                self.pending = None;
+                self.answer = None;
+                self.answer_in_flight = false;
             }
         }
     }
@@ -341,7 +388,10 @@ impl App {
     /// Apply one key press. Returns `Some(prompt)` when Enter submits
     /// a new run request (the shell starts the loop with it).
     ///
-    /// Key map (stage 4.2): Enter sends; Shift+Enter or Ctrl-J break
+    /// Key map: while a permission prompt is open it is **modal** —
+    /// `y` `n` `a` `r` answer it (stage 4.5), everything else is
+    /// ignored; Ctrl-C still quits. Otherwise (stage 4.2): Enter
+    /// sends; Shift+Enter or Ctrl-J break
     /// the line (unix terminals deliver Ctrl-J as Enter+CONTROL);
     /// Up/Down recall history at the composer's top/bottom row and
     /// move the cursor otherwise; PageUp/PageDown page the transcript
@@ -351,6 +401,24 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
+            return None;
+        }
+        // The permission prompt is modal (4.5): `y` `n` `a` `r` are
+        // its answers (captured once — a second press before the
+        // resolver acknowledges is swallowed), everything else is
+        // ignored so the composer can never eat prompt keys. Ctrl-C
+        // above still quits straight out of the prompt.
+        if self.pending.is_some() {
+            if !self.answer_in_flight {
+                self.answer = match key.code {
+                    KeyCode::Char('y') => Some(PermissionAnswer::Allow),
+                    KeyCode::Char('n') => Some(PermissionAnswer::Deny),
+                    KeyCode::Char('a') => Some(PermissionAnswer::AllowSession),
+                    KeyCode::Char('r') => Some(PermissionAnswer::AllowRule),
+                    _ => None,
+                };
+                self.answer_in_flight = self.answer.is_some();
+            }
             return None;
         }
         match key.code {
@@ -582,7 +650,7 @@ mod tests {
             })
         );
 
-        app.handle(AppEvent::PermissionAnswered);
+        app.handle(AppEvent::PermissionAnswered { note: None });
         assert_eq!(app.state(), AppState::Streaming);
         assert_eq!(app.pending(), None);
     }
@@ -859,5 +927,100 @@ mod tests {
 
         // An unconfigured app (no shell plumbing) renders no budget.
         assert!(!App::new().over_budget(), "budget 0 never goes red");
+    }
+
+    #[test]
+    fn permission_keys_offer_the_four_answers_modally() {
+        let mut app = App::new();
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "run_command".into(),
+            detail: "{\"command\":\"ls\"}".into(),
+        });
+
+        // `y` answers the prompt and never reaches the composer.
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.take_answer(), Some(PermissionAnswer::Allow));
+        assert!(app.prompt().is_empty(), "composer untouched");
+
+        // In flight until the resolver acknowledges: a second press is
+        // swallowed, so one decision can never be captured twice.
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.take_answer(), None, "double-answer suppressed");
+
+        // The acknowledgment carries a status note ("rule saved …").
+        app.handle(AppEvent::PermissionAnswered {
+            note: Some("rule saved: run_command = allow".into()),
+        });
+        assert_eq!(app.pending(), None, "prompt closed");
+        assert_eq!(app.state(), AppState::Streaming);
+        assert_eq!(app.status(), "rule saved: run_command = allow");
+
+        // The other three keys map one-to-one.
+        app.handle(AppEvent::PermissionRequested {
+            id: "c2".into(),
+            name: "write_file".into(),
+            detail: "{}".into(),
+        });
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.take_answer(), Some(PermissionAnswer::Deny));
+        app.handle(AppEvent::PermissionAnswered { note: None });
+
+        app.handle(AppEvent::PermissionRequested {
+            id: "c3".into(),
+            name: "write_file".into(),
+            detail: "{}".into(),
+        });
+        app.handle_key(key(KeyCode::Char('a')));
+        assert_eq!(app.take_answer(), Some(PermissionAnswer::AllowSession));
+        app.handle(AppEvent::PermissionAnswered { note: None });
+
+        app.handle(AppEvent::PermissionRequested {
+            id: "c4".into(),
+            name: "write_file".into(),
+            detail: "{}".into(),
+        });
+        app.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(app.take_answer(), Some(PermissionAnswer::AllowRule));
+
+        // A dead run can never leave a modal prompt — or a
+        // captured-but-unsent answer — behind.
+        app.handle(AppEvent::PermissionRequested {
+            id: "c5".into(),
+            name: "run_command".into(),
+            detail: "{}".into(),
+        });
+        app.handle_key(key(KeyCode::Char('y')));
+        app.handle(AppEvent::Error {
+            message: "provider down".into(),
+        });
+        assert_eq!(app.pending(), None, "prompt closed by run end");
+        assert_eq!(app.take_answer(), None, "stale answer dropped");
+    }
+
+    #[test]
+    fn the_prompt_is_modal_until_answered() {
+        let mut app = App::new();
+        type_text(&mut app, "draft");
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "run_command".into(),
+            detail: "ls".into(),
+        });
+
+        // Composer keys are swallowed while the prompt is open.
+        app.handle_key(key(KeyCode::Char('z')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.prompt(), "draft", "composer untouched");
+        assert!(!app.is_running(), "Enter did not submit");
+        assert_eq!(app.take_answer(), None, "`z` is not an answer");
+
+        // Non-answers stay non-answers.
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.take_answer(), None);
+
+        // Ctrl-C still quits straight out of the prompt.
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.should_quit());
     }
 }

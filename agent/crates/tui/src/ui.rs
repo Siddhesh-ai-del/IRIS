@@ -7,10 +7,11 @@
 //! block (stage 4.4: state + status on row A, the gauge bar — model,
 //! turn, budget, cost, TTFT, tok/s, cache % — on row B), and the
 //! composer (stage 4.2: the `ratatui-textarea` widget with key hints
-//! in its title).
+//! in its title). While a permission is pending, the stage-4.5 popup
+//! (preview + `y/n/a/r` hints) floats over everything.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Margin};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -67,7 +68,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         .split(chunks[2]);
     let status = match app.pending() {
         Some(pending) => format!(
-            "[{}] allow {} ({})? — prompt lands in 4.5",
+            "[{}] allow {} ({})?",
             app.state().label(),
             pending.name,
             pending.id
@@ -81,6 +82,89 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(composer_block, chunks[3]);
     let composer_area = chunks[3].inner(Margin::new(1, 1));
     frame.render_widget(app.composer(), composer_area);
+
+    // The permission prompt (4.5) floats above every pane: preview,
+    // then the four keys. Drawn last so it overlaps the transcript.
+    if let Some(pending) = app.pending() {
+        let popup = centered_rect(70, 45, frame.area());
+        let inner = popup.inner(Margin::new(1, 1));
+        let mut lines = preview(&pending.detail, inner.height.saturating_sub(3) as usize);
+        lines.push(Line::from(""));
+        lines.push(Line::from("[y] allow once   [n] deny once"));
+        lines.push(Line::from(
+            "[a] always (this session)   [r] always (rule → config)",
+        ));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Permission — {} ({})", pending.name, pending.id));
+        frame.render_widget(Paragraph::new(lines).block(block), popup);
+    }
+}
+
+/// A centered sub-rectangle in percentages of `area` — the permission
+/// prompt's popup.
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
+/// The command/diff preview at the heart of the prompt (4.5): the
+/// command for `run_command`, path + first body lines for file writes,
+/// patch text for `apply_patch`, pretty JSON otherwise — and the raw
+/// detail when it is not JSON at all. `room` is the popup's preview
+/// lines; more is clipped to an ellipsis so the key hints always fit.
+fn preview(detail: &str, room: usize) -> Vec<Line<'static>> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
+        return clip(
+            detail
+                .lines()
+                .map(|line| Line::from(line.to_string()))
+                .collect(),
+            room,
+        );
+    };
+    let body: Vec<String> = if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
+        vec![format!("$ {command}")]
+    } else if let (Some(path), Some(content)) = (
+        value.get("path").and_then(|v| v.as_str()),
+        value.get("content").and_then(|v| v.as_str()),
+    ) {
+        let mut lines = vec![path.to_string()];
+        lines.extend(content.lines().map(str::to_string));
+        lines
+    } else if let Some(patch) = value
+        .get("patch")
+        .and_then(|v| v.as_str())
+        .or_else(|| value.get("diff").and_then(|v| v.as_str()))
+    {
+        patch.lines().map(str::to_string).collect()
+    } else {
+        vec![serde_json::to_string_pretty(&value).unwrap_or_else(|_| detail.to_string())]
+    };
+    clip(body.into_iter().map(Line::from).collect(), room)
+}
+
+/// Clip a preview to `room` lines, ending in an ellipsis.
+fn clip(mut lines: Vec<Line<'static>>, room: usize) -> Vec<Line<'static>> {
+    if room > 0 && lines.len() > room {
+        lines.truncate(room.saturating_sub(1));
+        lines.push(Line::from("…"));
+    }
+    lines
 }
 
 /// The stage-4.4 gauge row: model · turn · budget bar · cost · TTFT ·
@@ -228,6 +312,22 @@ mod tests {
             text.contains("AwaitingPermission"),
             "state visible:\n{text}"
         );
+    }
+
+    #[test]
+    fn permission_popup_previews_the_command_and_lists_the_keys() {
+        let mut app = App::new();
+        app.handle(AppEvent::PermissionRequested {
+            id: "c3".into(),
+            name: "run_command".into(),
+            detail: "{\"command\":\"rm -rf build\"}".into(),
+        });
+        let text = rendered(&app);
+        assert!(text.contains("rm -rf build"), "command previewed:\n{text}");
+        assert!(text.contains("[y]"), "allow key:\n{text}");
+        assert!(text.contains("[n]"), "deny key:\n{text}");
+        assert!(text.contains("session"), "session scope key:\n{text}");
+        assert!(text.contains("[r]"), "rule key:\n{text}");
     }
 
     #[test]

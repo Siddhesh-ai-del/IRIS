@@ -36,8 +36,10 @@ pub enum AppEvent {
         name: String,
         detail: String,
     },
-    /// The user answered — the loop resumes.
-    PermissionAnswered,
+    /// The user answered — the loop resumes (`note` is shown in the
+    /// status line: "rule saved …" or the degraded-to-session note,
+    /// stage 4.5).
+    PermissionAnswered { note: Option<String> },
     /// The run stopped on its own terms — with its cumulative usage
     /// (the stage-4.4 budget gauge reads `total_tokens` from it).
     RunEnded { summary: String, usage: Usage },
