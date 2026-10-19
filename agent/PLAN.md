@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 5.1 (secret redactor at write time — `crates/core/src/redact.rs`)
-- **Current phase:** 5 — Privacy (in progress); next: 5.1 (Phase 4 complete: 4.1–4.6)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete)
+- **Next action:** Stage 5.2 (redaction test corpus — golden fixtures + proptest)
+- **Current phase:** 5 — Privacy (in progress); next: 5.2
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -590,11 +590,26 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 5 — Privacy (3 stages, ~3h) — **Wedge #2**
 
-- [ ] **5.1 Secret redactor at write time** (1h) — `crates/core/src/redact.rs`: pattern set
+- [x] **5.1 Secret redactor at write time** (1h) — `crates/core/src/redact.rs`: pattern set
   (AWS/GitHub/Anthropic/OpenAI keys, `PASSWORD=`, private-key blocks, `.env` assignments) +
   entropy heuristic; applied to transcript **and** tool output *before* persistence
   (claude-code #44868 pain). Risk: **High** (false negatives leak; false positives corrupt) ·
   Depends: 2.1
+  Done 2026-10-19 — four ordered passes over free text: PEM blocks → fixed-shape keys
+  (`KEY_RULES`: AWS AKIA/ASIA, GitHub ghp_/gho_/…/github_pat_, `sk-ant-`/`sk-or-v1-`/
+  generic `sk-`, Google `AIza`, Slack `xox*`, longest-prefix-first so kind labels stay
+  precise) → `NAME=value`/`NAME: "value"` assignments (segment-matched secret names with
+  a documented `public` guard, so `public_key` survives) → entropy heuristic (Shannon
+  ≥ 4.5, requires upper+lower+digits; pure-hex SHAs/UUIDs and snake_case can never
+  fire). `redact_json` uses **key context**: values under secret-ish keys and array
+  elements after `--password`-style flags redact by position. `redact_event` walks
+  `Event::Message` (text, tool-call inputs, tool results); `ContentBlock::Image`
+  passes through (documented — base64 pixels are entropy by construction). Wired into
+  `TranscriptWriter::append` — the single fsync chokepoint — so tool output and the
+  conversation are scrubbed *before* bytes hit disk; in-memory loop + provider wire
+  keep the original content. Markers keep the kind: `[REDACTED:github-token]`; redact
+  is idempotent; clean text stays zero-copy `Cow::Borrowed`. 16 new tests → 366/366
+  green, clippy/fmt clean, secret-scan clean.
 
 - [ ] **5.2 Redaction test corpus** (1h) — golden fixtures: real-shaped secrets in tool output,
   patch hunks, error messages; `proptest` that redacted output never matches raw pattern; assert

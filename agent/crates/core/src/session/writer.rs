@@ -112,9 +112,11 @@ impl TranscriptWriter {
 
     /// Append one event as a single JSONL line and fsync so it survives
     /// a crash. Stamps the current schema version itself — callers
-    /// cannot forget it.
+    /// cannot forget it. **Stage 5.1**: secrets are redacted here, the
+    /// single chokepoint every persisted byte passes through — before
+    /// serialization and fsync.
     pub fn append(&mut self, event: &Event) -> Result<(), WriterError> {
-        let line = Envelope::new(event.clone()).to_line()?;
+        let line = Envelope::new(crate::redact::redact_event(event.clone())).to_line()?;
         self.file.write_all(line.as_bytes())?;
         self.file.write_all(b"\n")?;
         self.file.sync_all()?;

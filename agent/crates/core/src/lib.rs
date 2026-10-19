@@ -8,6 +8,7 @@ pub mod assembly;
 pub mod config;
 pub mod metrics;
 pub mod provider;
+pub mod redact;
 pub mod session;
 pub mod tokens;
 pub mod tools;

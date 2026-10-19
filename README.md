@@ -63,26 +63,31 @@ released software.
   runs only the accepted hunks — rejected ones never touch the disk
   (stage 4.6).
 - 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
-- 📋 **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
+- ✅ **Default-on secret redaction** — patterns and entropy heuristics
+  scrub credentials (AWS/GitHub/Anthropic/OpenAI-shaped keys, `PASSWORD=`
+  assignments, private-key blocks, high-entropy tokens) from every
+  transcript line *before* it is persisted (stage 5.1).
 - 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
 - 📋 **Hooks and custom commands** — project-local automation without forking the agent.
 
 ## Project status
 
 **IRIS is pre-release and under active development.** Phases 0 through 4 of the
-[implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered
-configuration, the OpenRouter client with SSE streaming, five tools behind a
-config-backed permission gate, the headless agent loop, durable sessions
-(crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
-index), and cache-first prompt assembly with per-turn cost metrics have all
-landed — along with the full terminal UI. `iris chat` is usable today —
-streaming markdown transcript, multiline composer with history, gauge status
-bar, the interactive permission prompt (`y` / `n` / always-allow, with rules
-persisted to config), and a hunk diff view where file edits can be accepted or
-rejected per hunk (a partial accept runs only the accepted hunks). Next up:
-Phase 5 (privacy — secret redaction before anything is persisted). Everything
-is built under test-driven development (350 tests). There are no versioned
-releases yet.
+[implementation plan](agent/PLAN.md) are complete, and privacy work has started:
+the Cargo workspace, layered configuration, the OpenRouter client with SSE
+streaming, five tools behind a config-backed permission gate, the headless agent
+loop, durable sessions (crash-safe transcripts, `sessions list` / `sessions
+resume`, a rebuildable index), and cache-first prompt assembly with per-turn cost
+metrics have all landed — along with the full terminal UI. `iris chat` is usable
+today — streaming markdown transcript, multiline composer with history, gauge
+status bar, the interactive permission prompt (`y` / `n` / always-allow, with
+rules persisted to config), and a hunk diff view where file edits can be
+accepted or rejected per hunk (a partial accept runs only the accepted hunks).
+Secrets are redacted at write time: every transcript line passes a redactor
+(fixed-shape key patterns, credential assignments, private-key blocks, an
+entropy heuristic) before it is fsynced. Next up: stage 5.2 (redaction test
+corpus). Everything is built under test-driven development (366 tests). There
+are no versioned releases yet.
 
 ### Roadmap
 
@@ -95,7 +100,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
-| 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |
+| 5 | Privacy (secret redaction, telemetry-off guarantee) | 🔵 In progress (5.1) |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
