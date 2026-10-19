@@ -26,7 +26,8 @@ use iris_core::provider::{
 };
 use iris_core::session::writer::WriterError;
 use iris_core::tools::{
-    Decision, DenyOnAsk, ListTool, ReadTool, Tool, ToolContext, ToolError, ToolRegistry, WriteTool,
+    AskResolver, Decision, DenyOnAsk, ListTool, ReadTool, Resolution, Tool, ToolContext, ToolError,
+    ToolRegistry, WriteTool,
 };
 use iris_core::types::{ContentBlock, Message, Role, StopReason, ToolCall, ToolResult, Usage};
 
@@ -165,6 +166,48 @@ impl Tool for MarkerTool {
             content: "marker touched".into(),
             is_error: false,
         })
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct EchoArgs {
+    content: String,
+}
+
+/// Fixture tool: echoes back whatever input it received — how stage 4.6
+/// proves *which* input the loop actually executed.
+struct EchoTool {
+    seen: Arc<Mutex<String>>,
+}
+
+impl Tool for EchoTool {
+    type Args = EchoArgs;
+
+    fn name(&self) -> &'static str {
+        "echo_input"
+    }
+
+    fn description(&self) -> &'static str {
+        "Echoes its content argument"
+    }
+
+    async fn execute(&self, _ctx: &ToolContext, args: EchoArgs) -> Result<ToolResult, ToolError> {
+        *self.seen.lock().expect("poisoned") = args.content.clone();
+        Ok(ToolResult {
+            tool_use_id: String::new(),
+            content: format!("saw: {}", args.content),
+            is_error: false,
+        })
+    }
+}
+
+/// Resolver returning one scripted [`Resolution`] — stage 4.6 needs a
+/// resolution no closure can express (`AllowWith`).
+struct ScriptedResolution(Resolution);
+
+impl AskResolver for ScriptedResolution {
+    fn confirm(&self, _tool: &str, _detail: &str) -> Resolution {
+        self.0.clone()
     }
 }
 
@@ -404,6 +447,108 @@ async fn ask_policy_fails_closed_when_the_resolver_refuses() {
     let requests = scripted.requests();
     let results = fed_back(&requests[1]);
     assert!(results[0].is_error);
+    assert!(
+        results[0].content.contains("permission denied"),
+        "got: {}",
+        results[0].content
+    );
+}
+
+#[tokio::test]
+async fn ask_allow_with_runs_the_resolver_replacement_input() {
+    // Stage 4.6: a partially accepted file edit feeds back as a
+    // *replaced input* — the loop must execute THAT, not the model's
+    // original JSON.
+    let seen = Arc::new(Mutex::new(String::new()));
+    let mut registry = ToolRegistry::new();
+    registry.register(EchoTool {
+        seen: Arc::clone(&seen),
+    });
+
+    let scripted = Scripted::new(vec![
+        tool_response("c1", "echo_input", json!({"content": "ORIGINAL"})),
+        text_response("done", 7),
+    ]);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+    let resolver = ScriptedResolution(Resolution::AllowWith(
+        json!({"content": "PARTIAL"}).to_string(),
+    ));
+
+    let outcome = run(
+        &scripted,
+        &registry,
+        &ctx,
+        &resolver,
+        &options(5, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "got {outcome:?}"
+    );
+    assert_eq!(
+        seen.lock().expect("poisoned").as_str(),
+        "PARTIAL",
+        "the loop must execute the resolver's replacement input"
+    );
+    let requests = scripted.requests();
+    let results = fed_back(&requests[1]);
+    assert!(
+        !results[0].is_error,
+        "replacement ran: {}",
+        results[0].content
+    );
+}
+
+#[tokio::test]
+async fn ask_allow_with_unparsable_replacement_fails_closed() {
+    // A replacement that is not valid JSON must never run — neither the
+    // replacement nor the original (fail closed, stage 4.6).
+    let seen = Arc::new(Mutex::new(String::new()));
+    let mut registry = ToolRegistry::new();
+    registry.register(EchoTool {
+        seen: Arc::clone(&seen),
+    });
+
+    let scripted = Scripted::new(vec![
+        tool_response("c1", "echo_input", json!({"content": "ORIGINAL"})),
+        text_response("done", 7),
+    ]);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+    let resolver = ScriptedResolution(Resolution::AllowWith("not json".to_string()));
+
+    let outcome = run(
+        &scripted,
+        &registry,
+        &ctx,
+        &resolver,
+        &options(5, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "got {outcome:?}"
+    );
+    assert_eq!(
+        seen.lock().expect("poisoned").as_str(),
+        "",
+        "the original input must not run either"
+    );
+    let requests = scripted.requests();
+    let results = fed_back(&requests[1]);
+    assert!(results[0].is_error, "denied: {}", results[0].content);
     assert!(
         results[0].content.contains("permission denied"),
         "got: {}",

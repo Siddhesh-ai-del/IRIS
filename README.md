@@ -53,12 +53,15 @@ released software.
 - ✅ **Interactive TUI** — `iris chat`: a streaming shell with a multiline
   composer (history, `/commands`, paste), a markdown transcript pane, a
   gauge status bar (model, turn, budget bar, cost, TTFT, tok/s), and the
-  interactive permission prompt (Phase 4).
+  interactive permission prompt (Phase 4 — complete).
 - ✅ **Interactive permission prompt** — command/diff preview with
   `y` / `n` / always-allow scoped to the session or persisted as a
   `[permissions]` rule in the config file (stage 4.5).
-- 📋 **Diff review** — hunk-level rendering of pending file edits,
-  accept/reject per hunk (Phase 4).
+- ✅ **Diff review** — pending file edits render as hunks
+  (`write_file` diffed against the file, `apply_patch` sectioned);
+  per-hunk accept/reject with `j`/`k`/`space`, and a partial accept
+  runs only the accepted hunks — rejected ones never touch the disk
+  (stage 4.6).
 - 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
 - 📋 **Default-on secret redaction** — patterns and entropy heuristics applied before anything is persisted.
 - 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
@@ -66,18 +69,20 @@ released software.
 
 ## Project status
 
-**IRIS is pre-release and under active development.** Phases 0 through 3 of the
-[implementation plan](agent/PLAN.md) are complete and Phase 4 (the terminal UI)
-is underway: the Cargo workspace, layered configuration, the OpenRouter client
-with SSE streaming, five tools behind a config-backed permission gate, the
-headless agent loop, durable sessions (crash-safe transcripts, `sessions list` /
-`sessions resume`, a rebuildable index), and cache-first prompt assembly with
-per-turn cost metrics have all landed. The interactive shell `iris chat` is
-usable today — streaming markdown transcript, multiline composer with history,
-gauge status bar, and the interactive permission prompt (`y` / `n` /
-always-allow, with rules persisted to config). The diff view (stage 4.6) is
-the last Phase 4 piece. Everything is built
-under test-driven development (338 tests). There are no versioned releases yet.
+**IRIS is pre-release and under active development.** Phases 0 through 4 of the
+[implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered
+configuration, the OpenRouter client with SSE streaming, five tools behind a
+config-backed permission gate, the headless agent loop, durable sessions
+(crash-safe transcripts, `sessions list` / `sessions resume`, a rebuildable
+index), and cache-first prompt assembly with per-turn cost metrics have all
+landed — along with the full terminal UI. `iris chat` is usable today —
+streaming markdown transcript, multiline composer with history, gauge status
+bar, the interactive permission prompt (`y` / `n` / always-allow, with rules
+persisted to config), and a hunk diff view where file edits can be accepted or
+rejected per hunk (a partial accept runs only the accepted hunks). Next up:
+Phase 5 (privacy — secret redaction before anything is persisted). Everything
+is built under test-driven development (350 tests). There are no versioned
+releases yet.
 
 ### Roadmap
 
@@ -89,7 +94,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 1 | Headless agent core loop (providers, streaming, tools, permissions) | ✅ Complete |
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
-| 4 | Terminal UI (composer, streaming pane, status bar, diff review) | 🚧 In progress |
+| 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | Planned |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
@@ -125,7 +130,8 @@ export OPENROUTER_API_KEY=sk-or-v1-…   # never read from a config file
 the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).
 `iris chat` opens the interactive shell — permission asks surface as an
 interactive prompt whose always-allow answers can persist rules back to
-the config file; the diff view (stage 4.6) is the last Phase 4 piece.
+the config file, and file edits open a hunk diff view that can be accepted
+or rejected per hunk.
 
 ## Architecture
 
@@ -137,8 +143,8 @@ IRIS is a single Rust binary organized as a Cargo workspace under `agent/`:
   environment → flags), the headless runner, and the interactive shell plumbing.
 - **`iris-tui` (TUI)** — a thin presentation layer driven by events emitted from
   the core: a pure app state machine, a markdown transcript pane, a gauge
-  status bar, and the interactive permission prompt (Phase 4 in progress —
-  the diff view is the remaining stage).
+  status bar, the interactive permission prompt, and the hunk diff view
+  (Phase 4 complete).
 
 Provider access today is OpenRouter's OpenAI-compatible API with a hand-rolled SSE
 client. The transcript format is a versioned, append-only JSONL schema, documented
@@ -163,7 +169,7 @@ IRIS/
     └── crates/
         ├── core/      # iris-core — loop, tools, config, provider, sessions
         ├── cli/       # iris — the terminal binary (run, chat, sessions, doctor)
-        └── tui/       # iris-tui — the interactive shell (app state machine, composer, markdown pane)
+        └── tui/       # iris-tui — the interactive shell (app state machine, composer, markdown pane, diff view)
 ```
 
 ## Contributing

@@ -28,11 +28,11 @@ use super::registry::ToolError;
 ///
 /// `tool` is only used for [`ToolError::Failed`] messages (missing root,
 /// unresolvable symlink) so the model knows which tool broke.
-pub(super) fn resolve_within(
-    tool: &str,
-    root: &Path,
-    requested: &Path,
-) -> Result<PathBuf, ToolError> {
+///
+/// Public since stage 4.6: the TUI's permission prompt re-checks
+/// confinement before previewing the current file content (a preview
+/// must never read outside the workspace either).
+pub fn resolve_within(tool: &str, root: &Path, requested: &Path) -> Result<PathBuf, ToolError> {
     let canonical_root = root.canonicalize().map_err(|err| ToolError::Failed {
         tool: tool.to_string(),
         message: format!("cannot resolve workspace root {}: {err}", root.display()),

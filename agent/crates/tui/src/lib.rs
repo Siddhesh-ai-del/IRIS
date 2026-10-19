@@ -22,10 +22,12 @@
 
 pub mod app;
 pub mod ask;
+pub mod diff;
 pub mod events;
 pub mod markdown;
 pub mod term;
 pub mod ui;
 
 pub use app::{App, AppState, PendingPermission, PermissionAnswer};
+pub use diff::{EditDiff, Hunk};
 pub use events::AppEvent;

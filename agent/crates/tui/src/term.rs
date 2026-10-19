@@ -32,7 +32,7 @@ use iris_core::agent_loop::{self, LoopOutcome, Recorded, RunError};
 use iris_core::provider::Provider;
 use iris_core::session::schema::Event as TranscriptEvent;
 use iris_core::session::writer::TranscriptWriter;
-use iris_core::tools::{AskResolver, ToolContext, ToolRegistry};
+use iris_core::tools::{AskResolver, ToolContext, ToolRegistry, resolve_within};
 use iris_core::types::{Message, Role};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -45,7 +45,7 @@ use ratatui::crossterm::terminal::{
 };
 
 use crate::app::{App, PermissionAnswer};
-use crate::ask::PromptingResolver;
+use crate::ask::{OldContentLoader, PromptingResolver};
 use crate::events::{self, AppEvent};
 use crate::ui;
 
@@ -105,10 +105,19 @@ where
     let (answer_tx, answer_rx) = mpsc::channel::<PermissionAnswer>();
     // One resolver per session, so `always-allow (session)` rules
     // outlive individual runs (they live inside the resolver).
+    // Stage 4.6: the diff view needs a `write_file` target's current
+    // content — read through the same workspace confinement the tool
+    // itself uses (a preview must never reach outside either).
+    let root = chat.ctx.workspace_root.clone();
+    let load_old: OldContentLoader = Box::new(move |path: &str| {
+        let resolved = resolve_within("write_file", &root, &PathBuf::from(path)).ok()?;
+        std::fs::read_to_string(resolved).ok()
+    });
     let ask: Arc<dyn AskResolver> = Arc::new(PromptingResolver::new(
         tx.clone(),
         answer_rx,
         chat.config_path.clone(),
+        load_old,
     ));
     // The gauges' model / turn cap / token budget come from the run's
     // loop options (4.4).

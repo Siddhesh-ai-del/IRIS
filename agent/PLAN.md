@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 4.6 (diff view — `similar` hunk rendering of pending file edits, accept/reject per hunk, `insta` TUI snapshots)
-- **Current phase:** 4 — TUI (in progress); next: 4.6 (last Phase 4 stage)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19)
+- **Next action:** Stage 5.1 (secret redactor at write time — `crates/core/src/redact.rs`)
+- **Current phase:** 5 — Privacy (in progress); next: 5.1 (Phase 4 complete: 4.1–4.6)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -560,9 +560,33 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   a comment-preserving write is a follow-up). 11 new tests → 338/338 green, clippy/fmt clean.
   Phase 4: 4.1–4.5 done — only 4.6 (diff view) remains.
 
-- [ ] **4.6 Diff view** (1–2h) — `similar` hunk rendering of pending file edits, accept/reject per
+- [x] **4.6 Diff view** (1–2h) — done 2026-10-19
+  `similar` hunk rendering of pending file edits, accept/reject per
   hunk feeding back to the loop; `insta` TUI snapshots via `TestBackend`.
   Risk: Medium · Depends: 4.3, 1.8
+  - **Done 2026-10-19.** RED = 11 failures (2 core-loop, 3 diff, 2 app,
+    2 ask, 2 ui) → GREEN. Core: `AskResolver::confirm` returns
+    `Resolution{Allow, AllowWith(String), Deny}` — `AllowWith` carries
+    the **replaced input JSON** the loop executes (unparsable
+    replacement fails closed and the original never runs; closures
+    still resolve via `Decision`). `resolve_within` made public so the
+    prompt's preview read is confined too. `crates/tui/src/diff.rs`:
+    `EditDiff`/`Hunk` — `write_file` hunks via `similar`
+    `grouped_ops(3)`, `apply_patch` hunks = `@@` sections byte-ranged
+    in the patch text; `replacement_input()` replays accepted hunks
+    over the old lines (write) or drops rejected sections *and* the
+    `new_content` fallback (patch — it would undo the rejection).
+    `PermissionRequested` carries `old: Option<String>`: the resolver
+    loads it for `write_file` through a confined closure
+    (`resolve_within` + read, wired in `term::run`). App: `pending_diff`
+    + clamped `j/k` cursor + `space` toggle; `y` = plain Allow when all
+    accepted, else `PermissionAnswer::AllowWith{input, note}`
+    ("applied N/M hunks — partial, not remembered"; a partial choice is
+    never remembered, by design). Popup: taller rect in diff mode,
+    `✓/✗` marks, green/red lines, yellow cursor header, ↑/↓ scroll
+    markers, nav-hint row; title shows target path + counts. `insta`
+    snapshot `permission_diff_popup` pins the frame. 12 new tests →
+    350/350 green, clippy/fmt clean. **Phase 4 complete (4.1–4.6).**
 
 ### Phase 5 — Privacy (3 stages, ~3h) — **Wedge #2**
 

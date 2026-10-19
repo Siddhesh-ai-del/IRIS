@@ -10,6 +10,8 @@ iris-core = { path = "../core" }
 ratatui = "0.30"
 ratatui-textarea = "0.9.3"
 serde_json = "1.0.151"
+# stage 4.6: hunk rendering for the pending-edit diff view
+similar = "3.2.0"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "time"] }
 # default-features off: the `highlight-code` (syntect) default pulls a
 # heavy syntax set and swaps the deterministic code styles; the plan
@@ -21,5 +23,7 @@ workspace = true
 
 [dev-dependencies]
 futures = "0.3.34"
+# stage 4.6: TUI snapshots via TestBackend
+insta = "1.49.0"
 tempfile = "3.27.0"
 toml = "1.1.6"

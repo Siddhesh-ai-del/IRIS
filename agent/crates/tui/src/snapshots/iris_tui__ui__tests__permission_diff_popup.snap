@@ -1,0 +1,28 @@
+---
+source: crates/tui/src/ui.rs
+expression: text
+---
+┌iris chat─────────────────────────────────────────────────────────────────────┐
+│IRIS — AwaitingPermission                                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌transcript — PgUp/PgDn pages history──────────────────────────────────────────┐
+│           ┌Permission — write_file (c1) · src/main.rs — 1/1 hunks┐           │
+│           │✓ @@ -1,3 +1,4 @@                                     │           │
+│           │    fn main() {                                       │           │
+│           │  -     println!("hi");                               │           │
+│           │  +     let name = "iris";                            │           │
+│           │  +     println!("{name}");                           │           │
+│           │    }                                                 │           │
+│           │                                                      │           │
+│           │j/k hunks · space accept/reject — y runs the accepted │           │
+│           │[y] allow once   [n] deny once                        │           │
+│           │[a] always (this session)   [r] always (rule → config)│           │
+└───────────│──────────────────────────────────────────────────────│───────────┘
+[AwaitingPer│ission] allow write_file (c1)?                        │            
+turn -/0    │                                                      │            
+┌> input — E│ter sends · Shift+Enter/Ctrl-J newline · PgUp/PgDn scr│ll · /help─┐
+│           └──────────────────────────────────────────────────────┘           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

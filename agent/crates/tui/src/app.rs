@@ -26,6 +26,7 @@ use iris_core::metrics::TurnMetrics;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui_textarea::TextArea;
 
+use crate::diff::EditDiff;
 use crate::events::AppEvent;
 
 /// How many lines one scrollback page moves ([`App::page_up`] /
@@ -74,10 +75,11 @@ pub struct PendingPermission {
     pub detail: String,
 }
 
-/// What the user chose at the permission prompt (stage 4.5) — stored
-/// by [`App::handle_key`], taken once by the shell via
+/// What the user chose at the permission prompt (stages 4.5/4.6) —
+/// stored by [`App::handle_key`], taken once by the shell via
 /// [`App::take_answer`] and forwarded to the loop's blocked resolver.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// (`AllowWith` carries data, so this is clone-only, not `Copy`.)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PermissionAnswer {
     /// Run this call only.
     Allow,
@@ -89,6 +91,11 @@ pub enum PermissionAnswer {
     /// Allow and persist `[permissions].<tool> = "allow"` back to the
     /// config file, so future sessions allow it too.
     AllowRule,
+    /// Allow with a **replaced input** (stage 4.6): the user accepted
+    /// only part of a file edit, and the loop runs the call with
+    /// `input` instead of the model's original JSON. A partial choice
+    /// is deliberately never remembered (session or config).
+    AllowWith { input: String, note: String },
 }
 
 /// The whole UI-facing state of a chat session.
@@ -136,6 +143,12 @@ pub struct App {
     quit: bool,
     /// Set while [`AppState::AwaitingPermission`].
     pending: Option<PendingPermission>,
+    /// The hunk view of the open ask (stage 4.6) — `Some` for file
+    /// edits with something to show; `None` for every other ask.
+    pending_diff: Option<EditDiff>,
+    /// Which hunk the popup's cursor is on ([`App::handle_key`]'s
+    /// j/k/space move and toggle it, stage 4.6).
+    hunk_cursor: usize,
     /// Last turn's metrics (stage 4.4's status bar consumes these).
     last_metrics: Option<TurnMetrics>,
 }
@@ -168,6 +181,8 @@ impl App {
             running: false,
             quit: false,
             pending: None,
+            pending_diff: None,
+            hunk_cursor: 0,
             last_metrics: None,
         }
     }
@@ -221,6 +236,17 @@ impl App {
     /// The permission being awaited, if any.
     pub fn pending(&self) -> Option<&PendingPermission> {
         self.pending.as_ref()
+    }
+
+    /// The open ask's hunk view (stage 4.6), when it is a file edit
+    /// with hunks to show.
+    pub fn pending_diff(&self) -> Option<&EditDiff> {
+        self.pending_diff.as_ref()
+    }
+
+    /// Which hunk the popup's cursor is on (stage 4.6).
+    pub fn hunk_cursor(&self) -> usize {
+        self.hunk_cursor
     }
 
     /// Take the pending permission answer, if the user has given one
@@ -347,12 +373,23 @@ impl App {
                 self.last_metrics = Some(metrics);
                 self.state = AppState::Streaming;
             }
-            AppEvent::PermissionRequested { id, name, detail } => {
+            AppEvent::PermissionRequested {
+                id,
+                name,
+                detail,
+                old,
+            } => {
                 self.state = AppState::AwaitingPermission;
+                // File edits get a hunk view (stage 4.6); everything
+                // else keeps the plain 4.5 prompt.
+                self.pending_diff = crate::diff::build(&name, &detail, old.as_deref());
+                self.hunk_cursor = 0;
                 self.pending = Some(PendingPermission { id, name, detail });
             }
             AppEvent::PermissionAnswered { note } => {
                 self.pending = None;
+                self.pending_diff = None;
+                self.hunk_cursor = 0;
                 self.state = AppState::Streaming;
                 self.answer_in_flight = false;
                 if let Some(note) = note {
@@ -367,8 +404,11 @@ impl App {
                 // token budget (4.4).
                 self.run_tokens = usage.total_tokens;
                 // A dead run can never leave a modal prompt — or a
-                // captured-but-unsent answer — behind (4.5).
+                // captured-but-unsent answer — behind (4.5), diff
+                // view included (4.6).
                 self.pending = None;
+                self.pending_diff = None;
+                self.hunk_cursor = 0;
                 self.answer = None;
                 self.answer_in_flight = false;
             }
@@ -379,10 +419,32 @@ impl App {
                 // Same guarantee as RunEnded: the prompt closes with
                 // the run that asked for it.
                 self.pending = None;
+                self.pending_diff = None;
+                self.hunk_cursor = 0;
                 self.answer = None;
                 self.answer_in_flight = false;
             }
         }
+    }
+
+    /// The `y` answer for the open prompt when hunks were rejected
+    /// (stage 4.6): `Some(PermissionAnswer::AllowWith { .. })` runs
+    /// only the accepted parts; `None` means a plain allow is right
+    /// (everything accepted, or no diff at all).
+    fn partial_answer(&self) -> Option<PermissionAnswer> {
+        let diff = self.pending_diff.as_ref()?;
+        if diff.all_accepted() {
+            return None;
+        }
+        let (accepted, total) = diff.accepted_counts();
+        let input = diff.replacement_input()?;
+        Some(PermissionAnswer::AllowWith {
+            note: format!(
+                "applied {accepted}/{total} hunks to {} — partial, not remembered",
+                diff.path
+            ),
+            input,
+        })
     }
 
     /// Apply one key press. Returns `Some(prompt)` when Enter submits
@@ -407,11 +469,42 @@ impl App {
         // its answers (captured once — a second press before the
         // resolver acknowledges is swallowed), everything else is
         // ignored so the composer can never eat prompt keys. Ctrl-C
-        // above still quits straight out of the prompt.
+        // above still quits straight out of the prompt. With the 4.6
+        // diff view open, j/k (or the arrows) move between hunks and
+        // space toggles the current one.
         if self.pending.is_some() {
+            if self.pending_diff.is_some() {
+                let last = self
+                    .pending_diff
+                    .as_ref()
+                    .map_or(0, |diff| diff.hunks.len().saturating_sub(1));
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.hunk_cursor = (self.hunk_cursor + 1).min(last);
+                        return None;
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.hunk_cursor = self.hunk_cursor.saturating_sub(1);
+                        return None;
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(diff) = &mut self.pending_diff {
+                            diff.toggle(self.hunk_cursor);
+                        }
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
             if !self.answer_in_flight {
                 self.answer = match key.code {
-                    KeyCode::Char('y') => Some(PermissionAnswer::Allow),
+                    // 4.6: `y` with rejected hunks means "run the
+                    // accepted part only" — a replaced input, not the
+                    // model's original call.
+                    KeyCode::Char('y') => match self.partial_answer() {
+                        Some(answer) => Some(answer),
+                        None => Some(PermissionAnswer::Allow),
+                    },
                     KeyCode::Char('n') => Some(PermissionAnswer::Deny),
                     KeyCode::Char('a') => Some(PermissionAnswer::AllowSession),
                     KeyCode::Char('r') => Some(PermissionAnswer::AllowRule),
@@ -639,6 +732,7 @@ mod tests {
             id: "c7".into(),
             name: "run_command".into(),
             detail: "rm -rf target".into(),
+            old: None,
         });
         assert_eq!(app.state(), AppState::AwaitingPermission);
         assert_eq!(
@@ -936,6 +1030,7 @@ mod tests {
             id: "c1".into(),
             name: "run_command".into(),
             detail: "{\"command\":\"ls\"}".into(),
+            old: None,
         });
 
         // `y` answers the prompt and never reaches the composer.
@@ -961,6 +1056,7 @@ mod tests {
             id: "c2".into(),
             name: "write_file".into(),
             detail: "{}".into(),
+            old: None,
         });
         app.handle_key(key(KeyCode::Char('n')));
         assert_eq!(app.take_answer(), Some(PermissionAnswer::Deny));
@@ -970,6 +1066,7 @@ mod tests {
             id: "c3".into(),
             name: "write_file".into(),
             detail: "{}".into(),
+            old: None,
         });
         app.handle_key(key(KeyCode::Char('a')));
         assert_eq!(app.take_answer(), Some(PermissionAnswer::AllowSession));
@@ -979,6 +1076,7 @@ mod tests {
             id: "c4".into(),
             name: "write_file".into(),
             detail: "{}".into(),
+            old: None,
         });
         app.handle_key(key(KeyCode::Char('r')));
         assert_eq!(app.take_answer(), Some(PermissionAnswer::AllowRule));
@@ -989,6 +1087,7 @@ mod tests {
             id: "c5".into(),
             name: "run_command".into(),
             detail: "{}".into(),
+            old: None,
         });
         app.handle_key(key(KeyCode::Char('y')));
         app.handle(AppEvent::Error {
@@ -1006,6 +1105,7 @@ mod tests {
             id: "c1".into(),
             name: "run_command".into(),
             detail: "ls".into(),
+            old: None,
         });
 
         // Composer keys are swallowed while the prompt is open.
@@ -1022,5 +1122,96 @@ mod tests {
         // Ctrl-C still quits straight out of the prompt.
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.should_quit());
+    }
+
+    #[test]
+    fn diff_asks_open_with_hunks_the_keys_move_and_toggle() {
+        // A write_file ask carrying the current content → the app
+        // builds the hunk view (stage 4.6).
+        let mut app = App::new();
+        let detail =
+            serde_json::json!({"path": "f.txt", "content": "a1\nCHANGED\na3\n"}).to_string();
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "write_file".into(),
+            detail,
+            old: Some("a1\na2\na3\n".into()),
+        });
+        let diff = app.pending_diff().expect("diff view");
+        assert_eq!(diff.hunks.len(), 1);
+        assert!(diff.all_accepted(), "accepted by default");
+        assert_eq!(app.hunk_cursor(), 0);
+
+        // j/k move the hunk cursor (clamped), space toggles.
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.hunk_cursor(), 0, "clamped at the top");
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.hunk_cursor(), 0, "clamped at the bottom (one hunk)");
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(
+            !app.pending_diff().expect("diff").all_accepted(),
+            "space rejected the hunk"
+        );
+
+        // The prompt stays modal — these keys are not answers.
+        assert_eq!(app.take_answer(), None);
+        assert!(app.pending().is_some());
+    }
+
+    #[test]
+    fn rejecting_hunks_turns_y_into_a_partial_apply() {
+        let mut app = App::new();
+        let old = "a1\na2\na3\na4\na5\na6\na7\na8\na9\na10\n";
+        let new = "a1\nCHANGED\na3\na4\na5\na6\na7\na8\na9\nCHANGED2\n";
+
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "write_file".into(),
+            detail: serde_json::json!({"path": "f.txt", "content": new}).to_string(),
+            old: Some(old.into()),
+        });
+        assert_eq!(
+            app.pending_diff().expect("diff").hunks.len(),
+            2,
+            "two distant changes"
+        );
+
+        // Everything accepted (the default) → `y` is the plain allow.
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.take_answer(), Some(PermissionAnswer::Allow));
+        app.handle(AppEvent::PermissionAnswered { note: None });
+        assert_eq!(app.pending_diff(), None, "diff cleared with the prompt");
+
+        // Reject the first hunk → `y` becomes a partial apply whose
+        // input keeps only the second change.
+        app.handle(AppEvent::PermissionRequested {
+            id: "c2".into(),
+            name: "write_file".into(),
+            detail: serde_json::json!({"path": "f.txt", "content": new}).to_string(),
+            old: Some(old.into()),
+        });
+        app.handle_key(key(KeyCode::Char(' '))); // reject hunk 0
+        app.handle_key(key(KeyCode::Char('y')));
+        let Some(PermissionAnswer::AllowWith { input, note }) = app.take_answer() else {
+            panic!("partial apply expected");
+        };
+        assert!(note.contains("1/2"), "note counts hunks: {note}");
+        let input: serde_json::Value = serde_json::from_str(&input).expect("json");
+        let expected = "a1\na2\na3\na4\na5\na6\na7\na8\na9\nCHANGED2\n";
+        assert_eq!(input["content"], expected, "accepted hunk only");
+
+        // A dead run clears the diff view too.
+        app.handle(AppEvent::PermissionAnswered { note: None });
+        app.handle(AppEvent::PermissionRequested {
+            id: "c3".into(),
+            name: "write_file".into(),
+            detail: serde_json::json!({"path": "f.txt", "content": new}).to_string(),
+            old: Some(old.into()),
+        });
+        app.handle(AppEvent::RunEnded {
+            summary: "stopped".into(),
+            usage: Usage::default(),
+        });
+        assert_eq!(app.pending_diff(), None, "diff cleared by run end");
     }
 }

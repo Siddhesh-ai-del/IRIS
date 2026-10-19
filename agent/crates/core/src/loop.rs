@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use serde_json::Value;
 
 use crate::assembly::{Assembler, CacheBust};
 use crate::config::Config;
@@ -25,7 +26,7 @@ use crate::provider::{CompletionRequest, Provider, ProviderError, StreamAssemble
 use crate::session::schema::Outcome;
 use crate::session::writer::WriterError;
 use crate::tokens;
-use crate::tools::permissions::{AskResolver, Decision, Gate};
+use crate::tools::permissions::{AskResolver, Decision, Gate, Resolution};
 use crate::tools::{ToolContext, ToolRegistry};
 use crate::types::{ContentBlock, Message, Role, ToolCall, ToolResult, Usage};
 
@@ -341,21 +342,37 @@ where
             });
             let detail = call.input.to_string();
             // The config gate decides allow/deny here; an ask goes to
-            // the resolver (TUI prompt at stage 4.5) and fails closed
-            // on anything but an explicit Allow. The resolved decision
-            // becomes the gate the registry re-checks at dispatch —
-            // one enforcement point (stage 1.7), nothing forgettable.
+            // the resolver (TUI prompt at stages 4.5/4.6) and fails
+            // closed on anything but an explicit Allow/AllowWith. A
+            // resolver's replacement input (4.6 partial accept) is what
+            // actually runs; unparsable replacements fail closed and
+            // the original never runs. The resolved decision becomes
+            // the gate the registry re-checks at dispatch — one
+            // enforcement point (stage 1.7), nothing forgettable.
+            let mut input = call.input.clone();
             let gate: Gate = match ctx.permissions.check(&call.name, &detail) {
                 Decision::Allow => Arc::new(|_: &str, _: &str| Decision::Allow),
                 Decision::Deny => Arc::new(|_: &str, _: &str| Decision::Deny),
                 Decision::Ask => match ask.confirm(&call.name, &detail) {
-                    Decision::Allow => Arc::new(|_: &str, _: &str| Decision::Allow),
-                    _ => Arc::new(|_: &str, _: &str| Decision::Deny),
+                    Resolution::Allow => Arc::new(|_: &str, _: &str| Decision::Allow),
+                    // The user accepted only part of a file edit (4.6):
+                    // run the replacement input — an unparsable one
+                    // fails closed, and the original never runs.
+                    Resolution::AllowWith(replacement) => {
+                        match serde_json::from_str::<Value>(&replacement) {
+                            Ok(value) => {
+                                input = value;
+                                Arc::new(|_: &str, _: &str| Decision::Allow)
+                            }
+                            Err(_) => Arc::new(|_: &str, _: &str| Decision::Deny),
+                        }
+                    }
+                    Resolution::Deny => Arc::new(|_: &str, _: &str| Decision::Deny),
                 },
             };
             let call_ctx = ToolContext::with_gate(ctx.workspace_root.clone(), gate);
             let result = registry
-                .execute(&call.name, &call_ctx, &call.id, call.input.clone())
+                .execute(&call.name, &call_ctx, &call.id, input)
                 .await
                 .unwrap_or_else(|err| ToolResult {
                     tool_use_id: call.id.clone(),

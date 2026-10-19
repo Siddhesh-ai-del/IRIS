@@ -30,11 +30,15 @@ pub enum AppEvent {
     },
     /// This turn's measurements (stage 3.3).
     Metrics(TurnMetrics),
-    /// The loop's resolver is blocked asking the user (stage 4.5).
+    /// The loop's resolver is blocked asking the user (stages 4.5/4.6).
     PermissionRequested {
         id: String,
         name: String,
         detail: String,
+        /// The file's current content for `write_file` asks (stage 4.6
+        /// diff view) — `None` when there is nothing to diff against
+        /// (new file, non-file tool, unreadable/escaping path).
+        old: Option<String>,
     },
     /// The user answered — the loop resumes (`note` is shown in the
     /// status line: "rule saved …" or the degraded-to-session note,

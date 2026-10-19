@@ -13,9 +13,10 @@ mod path;
 
 pub use list::{ListTool, MAX_LIST_ENTRIES};
 pub use patch::ApplyPatchTool;
+pub use path::resolve_within;
 pub use permissions::{
     AllowAll, AskResolver, Decision, DenyAll, DenyOnAsk, Gate, PermissionGate, PolicyGate,
-    builtin_policy,
+    Resolution, builtin_policy,
 };
 pub use read::{MAX_READ_BYTES, ReadTool};
 pub use registry::{Tool, ToolContext, ToolError, ToolRegistry};

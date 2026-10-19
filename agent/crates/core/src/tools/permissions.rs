@@ -27,6 +27,23 @@ pub enum Decision {
     Ask,
 }
 
+/// What a human — or its stand-in, the stage-4.6 TUI prompt —
+/// resolved an `ask` **to**. [`Resolution::AllowWith`] is how a
+/// partially accepted file edit feeds back to the loop: the call runs
+/// with the carried **replacement input JSON** instead of the model's
+/// original one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolution {
+    /// Run the call exactly as the model issued it.
+    Allow,
+    /// Run the call with this replaced input JSON (the user accepted
+    /// only part of a file edit). An unparsable replacement fails
+    /// closed in the loop — the original never runs.
+    AllowWith(String),
+    /// Refuse the call (fail closed).
+    Deny,
+}
+
 /// Checkpoint every tool dispatch goes through.
 pub trait PermissionGate: Send + Sync {
     /// `detail` is the raw argument JSON — enough for an audit line or an
@@ -105,12 +122,14 @@ impl PermissionGate for PolicyGate {
 
 /// Resolves [`Decision::Ask`] where a human — or its stand-in — can be
 /// consulted. The loop asks **before** dispatch; the TUI prompt (stage
-/// 4.5) will implement this trait, while headless mode and tests use
+/// 4.5/4.6) implements this trait, while headless mode and tests use
 /// the provided stand-ins and closures.
 pub trait AskResolver: Send + Sync {
-    /// Return `Allow` to run the call; **anything else is treated as a
+    /// Return [`Resolution::Allow`] to run the call as issued,
+    /// [`Resolution::AllowWith`] to run it with a replaced input
+    /// (stage 4.6 partial edits); **anything else is treated as a
     /// refusal** (fail closed).
-    fn confirm(&self, tool: &str, detail: &str) -> Decision;
+    fn confirm(&self, tool: &str, detail: &str) -> Resolution;
 }
 
 /// Headless default: there is no UI to ask, so every `Ask` is refused.
@@ -118,19 +137,24 @@ pub trait AskResolver: Send + Sync {
 pub struct DenyOnAsk;
 
 impl AskResolver for DenyOnAsk {
-    fn confirm(&self, _tool: &str, _detail: &str) -> Decision {
-        Decision::Deny
+    fn confirm(&self, _tool: &str, _detail: &str) -> Resolution {
+        Resolution::Deny
     }
 }
 
 /// Closures are resolvers: `|tool, detail| Decision::…` (test doubles,
-/// scripted approvals, session-wide rules).
+/// scripted approvals, session-wide rules). A closure cannot express
+/// [`Resolution::AllowWith`] — a returned `Decision::Ask` is treated
+/// as a refusal (fail closed).
 impl<F> AskResolver for F
 where
     F: Fn(&str, &str) -> Decision + Send + Sync,
 {
-    fn confirm(&self, tool: &str, detail: &str) -> Decision {
-        self(tool, detail)
+    fn confirm(&self, tool: &str, detail: &str) -> Resolution {
+        match self(tool, detail) {
+            Decision::Allow => Resolution::Allow,
+            Decision::Deny | Decision::Ask => Resolution::Deny,
+        }
     }
 }
 
@@ -214,12 +238,12 @@ mod tests {
     #[test]
     fn deny_on_ask_refuses_without_a_ui() {
         // Headless default: nothing can prompt → fail closed.
-        assert_eq!(DenyOnAsk.confirm("run_command", "{}"), Decision::Deny);
+        assert_eq!(DenyOnAsk.confirm("run_command", "{}"), Resolution::Deny);
     }
 
     #[test]
     fn closures_can_resolve_asks() {
         let resolver: &dyn AskResolver = &|_tool: &str, _detail: &str| Decision::Allow;
-        assert_eq!(resolver.confirm("run_command", "{}"), Decision::Allow);
+        assert_eq!(resolver.confirm("run_command", "{}"), Resolution::Allow);
     }
 }

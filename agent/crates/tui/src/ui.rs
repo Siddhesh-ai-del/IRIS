@@ -17,6 +17,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::App;
+use crate::diff::EditDiff;
 
 /// Composer key hints, rendered in the pane title (the `> ` prefix
 /// marks the input row, as since the 4.1 skeleton).
@@ -83,20 +84,41 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     let composer_area = chunks[3].inner(Margin::new(1, 1));
     frame.render_widget(app.composer(), composer_area);
 
-    // The permission prompt (4.5) floats above every pane: preview,
-    // then the four keys. Drawn last so it overlaps the transcript.
+    // The permission prompt (4.5/4.6) floats above every pane: the
+    // hunk view for file edits, the plain preview otherwise — then the
+    // key hints. Drawn last so it overlaps the transcript.
     if let Some(pending) = app.pending() {
-        let popup = centered_rect(70, 45, frame.area());
+        let diff = app.pending_diff();
+        // The hunk view needs more vertical room than the preview.
+        let popup = centered_rect(70, if diff.is_some() { 65 } else { 45 }, frame.area());
         let inner = popup.inner(Margin::new(1, 1));
-        let mut lines = preview(&pending.detail, inner.height.saturating_sub(3) as usize);
+        let hint_rows = if diff.is_some() { 4 } else { 3 };
+        let room = inner.height.saturating_sub(hint_rows) as usize;
+        let mut lines = match diff {
+            Some(diff) => diff_view(diff, app.hunk_cursor(), room),
+            None => preview(&pending.detail, room),
+        };
         lines.push(Line::from(""));
+        if diff.is_some() {
+            lines.push(Line::from(
+                "j/k hunks · space accept/reject — y runs the accepted parts",
+            ));
+        }
         lines.push(Line::from("[y] allow once   [n] deny once"));
         lines.push(Line::from(
             "[a] always (this session)   [r] always (rule → config)",
         ));
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Permission — {} ({})", pending.name, pending.id));
+        let title = match diff {
+            Some(diff) => {
+                let (accepted, total) = diff.accepted_counts();
+                format!(
+                    "Permission — {} ({}) · {} — {accepted}/{total} hunks",
+                    pending.name, pending.id, diff.path
+                )
+            }
+            None => format!("Permission — {} ({})", pending.name, pending.id),
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
         frame.render_widget(Paragraph::new(lines).block(block), popup);
     }
 }
@@ -165,6 +187,67 @@ fn clip(mut lines: Vec<Line<'static>>, room: usize) -> Vec<Line<'static>> {
         lines.push(Line::from("…"));
     }
     lines
+}
+
+/// The hunk view inside the prompt (stage 4.6): each hunk's header
+/// carries its accept mark (`✓`/`✗`, the cursor's header highlighted),
+/// `+` lines are green, `-` red, context dim. When the whole diff does
+/// not fit, the view scrolls so the cursor hunk's header stays
+/// visible, with ↑/↓ markers for the cut-off rest.
+fn diff_view(diff: &EditDiff, cursor: usize, room: usize) -> Vec<Line<'static>> {
+    if room == 0 {
+        return Vec::new();
+    }
+    let mut flat: Vec<Line<'static>> = Vec::new();
+    for (index, hunk) in diff.hunks.iter().enumerate() {
+        let mark = if hunk.accepted { "✓" } else { "✗" };
+        let header_style = if index == cursor {
+            Style::new().fg(Color::Yellow).bold()
+        } else if hunk.accepted {
+            Style::new().fg(Color::DarkGray)
+        } else {
+            Style::new().fg(Color::Red)
+        };
+        flat.push(Line::styled(
+            format!("{mark} {}", hunk.header),
+            header_style,
+        ));
+        for (sign, text) in &hunk.lines {
+            let style = match sign {
+                '+' => Style::new().fg(Color::Green),
+                '-' => Style::new().fg(Color::Red),
+                _ => Style::new().fg(Color::DarkGray),
+            };
+            let text = text.trim_end_matches('\n');
+            flat.push(Line::styled(format!("  {sign} {text}"), style));
+        }
+    }
+    let total = flat.len();
+    if total <= room {
+        return flat;
+    }
+    // Scroll: the cursor hunk's header is the first visible line once
+    // the tail would otherwise push it out of the window.
+    let cursor_start: usize = diff
+        .hunks
+        .iter()
+        .take(cursor.min(diff.hunks.len()))
+        .map(|hunk| 1 + hunk.lines.len())
+        .sum();
+    let start = cursor_start.min(total.saturating_sub(room));
+    let mut take = room.saturating_sub(usize::from(start > 0));
+    if start + take < total {
+        take = take.saturating_sub(1); // room for the ↓ marker
+    }
+    let mut visible: Vec<Line<'static>> = Vec::with_capacity(room);
+    if start > 0 {
+        visible.push(Line::from("  ↑"));
+    }
+    visible.extend(flat.into_iter().skip(start).take(take));
+    if start + take < total {
+        visible.push(Line::from("  ↓"));
+    }
+    visible
 }
 
 /// The stage-4.4 gauge row: model · turn · budget bar · cost · TTFT ·
@@ -244,6 +327,7 @@ fn budget_bar(used: u64, budget: u64) -> String {
 mod tests {
     use iris_core::metrics::TurnMetrics;
     use iris_core::types::Usage;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::Color;
 
     use super::*;
@@ -305,6 +389,7 @@ mod tests {
             id: "c3".into(),
             name: "run_command".into(),
             detail: "rm -rf build".into(),
+            old: None,
         });
         let text = rendered(&app);
         assert!(text.contains("run_command"), "the ask is visible:\n{text}");
@@ -321,6 +406,7 @@ mod tests {
             id: "c3".into(),
             name: "run_command".into(),
             detail: "{\"command\":\"rm -rf build\"}".into(),
+            old: None,
         });
         let text = rendered(&app);
         assert!(text.contains("rm -rf build"), "command previewed:\n{text}");
@@ -328,6 +414,49 @@ mod tests {
         assert!(text.contains("[n]"), "deny key:\n{text}");
         assert!(text.contains("session"), "session scope key:\n{text}");
         assert!(text.contains("[r]"), "rule key:\n{text}");
+    }
+
+    #[test]
+    fn the_diff_popup_renders_hunks_marks_and_the_nav_hint() {
+        let mut app = App::new();
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "write_file".into(),
+            detail: serde_json::json!({
+                "path": "src/main.rs",
+                "content": "fn main() {\n    let name = \"iris\";\n    println!(\"{name}\");\n}\n"
+            })
+            .to_string(),
+            old: Some("fn main() {\n    println!(\"hi\");\n}\n".into()),
+        });
+        let text = rendered(&app);
+        assert!(
+            text.contains("src/main.rs"),
+            "target path in the title:\n{text}"
+        );
+        assert!(text.contains("@@"), "hunk header:\n{text}");
+        assert!(
+            text.contains('+') && text.contains('-'),
+            "diff signs:\n{text}"
+        );
+        assert!(text.contains("space accept/reject"), "nav hint:\n{text}");
+        insta::assert_snapshot!("permission_diff_popup", text);
+    }
+
+    #[test]
+    fn rejecting_a_hunk_marks_it_and_updates_the_counts() {
+        let mut app = App::new();
+        app.handle(AppEvent::PermissionRequested {
+            id: "c1".into(),
+            name: "write_file".into(),
+            detail: serde_json::json!({"path": "f.txt", "content": "a1\nCHANGED\na3\n"})
+                .to_string(),
+            old: Some("a1\na2\na3\n".into()),
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        let text = rendered(&app);
+        assert!(text.contains('✗'), "rejected mark:\n{text}");
+        assert!(text.contains("0/1 hunks"), "counts update:\n{text}");
     }
 
     #[test]
