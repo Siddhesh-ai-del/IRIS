@@ -1,0 +1,10 @@
+---
+source: crates/core/tests/redaction_corpus.rs
+expression: output
+---
+OPENROUTER_API_KEY=[REDACTED:openrouter-key]
+AWS_ACCESS_KEY_ID=[REDACTED:aws-access-key]
+AWS_SECRET_ACCESS_KEY=[REDACTED:credential]
+DB_PASSWORD=[REDACTED:credential]
+GITHUB_TOKEN=[REDACTED:github-token]
+DATABASE_URL=postgres://app:localdev@localhost:5432/iris

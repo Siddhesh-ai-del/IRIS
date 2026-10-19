@@ -85,9 +85,9 @@ rules persisted to config), and a hunk diff view where file edits can be
 accepted or rejected per hunk (a partial accept runs only the accepted hunks).
 Secrets are redacted at write time: every transcript line passes a redactor
 (fixed-shape key patterns, credential assignments, private-key blocks, an
-entropy heuristic) before it is fsynced. Next up: stage 5.2 (redaction test
-corpus). Everything is built under test-driven development (366 tests). There
-are no versioned releases yet.
+entropy heuristic) before it is fsynced. Next up: stage 5.3 (telemetry-off
+guarantee). Everything is built under test-driven development (370 tests).
+There are no versioned releases yet.
 
 ### Roadmap
 
@@ -100,7 +100,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 2 | Session durability (transcript schema, crash-safe writes, resume) | ✅ Complete |
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
-| 5 | Privacy (secret redaction, telemetry-off guarantee) | 🔵 In progress (5.1) |
+| 5 | Privacy (secret redaction, telemetry-off guarantee) | 🔵 In progress (5.2) |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | Planned |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 

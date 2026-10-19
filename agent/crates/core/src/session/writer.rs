@@ -112,11 +112,9 @@ impl TranscriptWriter {
 
     /// Append one event as a single JSONL line and fsync so it survives
     /// a crash. Stamps the current schema version itself — callers
-    /// cannot forget it. **Stage 5.1**: secrets are redacted here, the
-    /// single chokepoint every persisted byte passes through — before
-    /// serialization and fsync.
+    /// cannot forget it.
     pub fn append(&mut self, event: &Event) -> Result<(), WriterError> {
-        let line = Envelope::new(crate::redact::redact_event(event.clone())).to_line()?;
+        let line = sealed_line(event)?;
         self.file.write_all(line.as_bytes())?;
         self.file.write_all(b"\n")?;
         self.file.sync_all()?;
@@ -127,6 +125,15 @@ impl TranscriptWriter {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// The exact JSONL line [`TranscriptWriter::append`] seals to disk:
+/// schema envelope around the **redacted** event. Stage 5.2 pins the
+/// ordering this way — redaction happens here, at line construction,
+/// so the bytes handed to `write_all`/`sync_all` are already scrubbed;
+/// the in-memory event (and the provider wire) keep the original.
+fn sealed_line(event: &Event) -> Result<String, WriterError> {
+    Ok(Envelope::new(crate::redact::redact_event(event.clone())).to_line()?)
 }
 
 /// Read back every event a transcript currently holds — the recovery
@@ -242,6 +249,41 @@ mod tests {
             model: "openai/gpt-4o-mini".into(),
             started_at: ts(),
         }
+    }
+
+    /// Stage 5.2: `append` writes `sealed_line(event)` and only then
+    /// fsyncs — so the durable bytes are redacted by construction. This
+    /// pins the ordering directly: the sealed line itself must be
+    /// scrubbed while the caller's event keeps the original.
+    #[test]
+    fn sealed_line_redacts_before_write_and_fsync() {
+        let event = Event::Message(Message::text(
+            Role::User,
+            "DB_PASSWORD=hunter2 key=sk-or-v1-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+        ));
+        let line = sealed_line(&event).unwrap();
+        assert!(
+            !line.contains("hunter2"),
+            "raw secret in sealed line: {line}"
+        );
+        assert!(
+            !line.contains("a1b2c3d4e5f6"),
+            "raw key in sealed line: {line}"
+        );
+        assert!(line.contains("[REDACTED:credential]"), "{line}");
+        assert!(line.contains("[REDACTED:openrouter-key]"), "{line}");
+        // The in-memory event is untouched — tools and the provider
+        // wire still see the original.
+        let Event::Message(message) = &event else {
+            panic!("expected message event");
+        };
+        let crate::types::ContentBlock::Text { text } = &message.content[0] else {
+            panic!("expected text block");
+        };
+        assert!(
+            text.contains("hunter2"),
+            "caller's event was mutated: {text}"
+        );
     }
 
     fn start_event() -> Event {

@@ -1,0 +1,8 @@
+> GET /api/v1/chat/completions HTTP/1.1
+> Host: openrouter.ai
+> Authorization: Bearer sk-or-v1-0f4c2a9e1b7d83f56c2a4e8b9d0f1c3a
+> X-Title: iris
+> Content-Type: application/json
+>
+< HTTP/1.1 200 OK
+< X-Request-Id: 8f14e45f-ea2c-4d3b-9c6a-1b2d3e4f5a6b

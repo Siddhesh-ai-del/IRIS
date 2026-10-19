@@ -1,0 +1,6 @@
+Sure — here is the deploy key you asked for:
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXkta2V5LXZlcnNpb24tMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw
+MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA
+-----END OPENSSH PRIVATE KEY-----
+Let me know if you need anything else.

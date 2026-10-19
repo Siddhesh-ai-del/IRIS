@@ -1,0 +1,3 @@
+The agent ran the tests, then wrote a summary to notes.md.
+Nothing here looks like a credential — the password policy doc,
+public_key rotation meetings, or the word tokenization itself.

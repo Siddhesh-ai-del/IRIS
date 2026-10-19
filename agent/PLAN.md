@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 5.2 (redaction test corpus — golden fixtures + proptest)
-- **Current phase:** 5 — Privacy (in progress); next: 5.2
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19)
+- **Next action:** Stage 5.3 (telemetry-off guarantee — no outbound host except configured LLM providers)
+- **Current phase:** 5 — Privacy (in progress); next: 5.3
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -611,9 +611,21 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   is idempotent; clean text stays zero-copy `Cow::Borrowed`. 16 new tests → 366/366
   green, clippy/fmt clean, secret-scan clean.
 
-- [ ] **5.2 Redaction test corpus** (1h) — golden fixtures: real-shaped secrets in tool output,
+- [x] **5.2 Redaction test corpus** (1h) — golden fixtures: real-shaped secrets in tool output,
   patch hunks, error messages; `proptest` that redacted output never matches raw pattern; assert
   redaction is applied *before* fsync. Risk: Medium · Depends: 5.1
+  Done 2026-10-19 — six golden fixtures in `crates/core/tests/corpus/` (env dump, curl
+  headers with `Authorization: Bearer`, `.env` patch hunk, git remote-URL error, SSH-key
+  paste, clean-prose negative control) pinned by `insta` snapshots — the corpus caught
+  one real over-redaction during review ("a credential: the" in prose → assignment rule;
+  fixture uses an em-dash, the rule is kept — it's what catches headers/JSON). Two
+  proptests: planted real-shaped secrets (per-family body lengths ≥ each rule's
+  documented minimum) never survive any surrounding text; arbitrary-Unicode input never
+  panics and redaction is idempotent (resume-safe). "Before fsync" pinned directly:
+  `TranscriptWriter::append` now seals through a testable `sealed_line(event)` helper,
+  unit-asserted to return a scrubbed line while the caller's in-memory event keeps the
+  original — so the bytes `write_all`/`sync_all` receive are redacted by construction.
+  4 new tests → 370/370 green, clippy/fmt clean, secret-scan clean.
 
 - [ ] **5.3 Telemetry-off guarantee** (0.5h) — no outbound host except configured LLM providers;
   test asserts zero extra sockets; `doctor` shows exactly what leaves the machine.

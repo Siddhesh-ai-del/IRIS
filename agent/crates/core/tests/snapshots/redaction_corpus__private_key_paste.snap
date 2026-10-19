@@ -1,0 +1,7 @@
+---
+source: crates/core/tests/redaction_corpus.rs
+expression: output
+---
+Sure — here is the deploy key you asked for:
+[REDACTED:private-key]
+Let me know if you need anything else.

@@ -1,0 +1,4 @@
+remote: Support for password authentication was removed on August 15, 2021.
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
+hint: A Personal Access Token (PAT) can be used instead.
+hint: The token used by this remote: https://x-access-token:ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7r8@github.com/org/repo.git
