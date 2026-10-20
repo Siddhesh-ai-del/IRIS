@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Terminal-based AI coding agent"
+# `cargo run -p iris` keeps meaning the agent, not the test fixture bin.
+default-run = "iris"
 
 [[bin]]
 name = "iris"

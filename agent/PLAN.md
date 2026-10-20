@@ -700,6 +700,11 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   `chat` (dedicated runtime across the TUI's lifetime). Fixture bin `iris-fake-mcp`
   (`required-features = ["test-fixtures"]`) speaks NDJSON-RPC over stdio for the new
   e2e suite. 16 new tests → **403/403 green**, clippy/fmt/secret-scan clean.
+  **Live-validated** against the real world: the official
+  `@modelcontextprotocol/server-filesystem` over npx + `nvidia/nemotron-3.5-lightning:free`
+  — the model called `mcp_demo_read_file` through the gate (allowed by config rule),
+  the fixture file's exact contents came back, 2 turns / 7,408 tokens / $0.00, key
+  never touched disk or transcript.
 
 - [ ] **6.4 Hooks/events** (1h) — `on_tool_pre`, `on_tool_post`, `on_turn_end`, `on_compact`:
   shell commands with timeout + JSON payload. Risk: Low · Depends: 1.9
