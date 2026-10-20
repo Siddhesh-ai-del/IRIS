@@ -62,7 +62,10 @@ released software.
   per-hunk accept/reject with `j`/`k`/`space`, and a partial accept
   runs only the accepted hunks — rejected ones never touch the disk
   (stage 4.6).
-- 📋 **Workspace checkpoints** — snapshot and restore your working state around agent activity.
+- ✅ **Workspace checkpoints** — `iris checkpoint create/list/restore`
+  snapshot the worktree as git-first orphan commits on a private ref:
+  your branch and index never move, ignored files are never captured,
+  and restore rewinds to the exact state (stage 6.1).
 - ✅ **Default-on secret redaction** — patterns and entropy heuristics
   scrub credentials (AWS/GitHub/Anthropic/OpenAI-shaped keys, `PASSWORD=`
   assignments, private-key blocks, high-entropy tokens) from every
@@ -90,8 +93,8 @@ none behind, the dependency graph may not grow a second HTTP client or a
 telemetry SDK, and `iris doctor` spells out exactly what leaves the machine.
 The whole privacy stack has been validated live against the real OpenRouter
 API with a free model — real streaming, a real tool call, $0.00 cost. Next
-up: Phase 6 (starting with git-first checkpoints). Everything is built under
-test-driven development (373 tests). There are no versioned releases yet.
+up: Phase 6 (6.2: compaction next). Everything is built under
+test-driven development (380 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -105,7 +108,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
-| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.1) |
+| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.2) |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,

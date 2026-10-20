@@ -1,7 +1,9 @@
-//! `iris` CLI entry point. Subcommands: `run`, `chat`, `sessions`, `doctor`
-//! (stage 0.2 defines the surface; execution semantics land in stages 1.10+).
+//! `iris` CLI entry point. Subcommands: `run`, `chat`, `sessions`,
+//! `checkpoint`, `doctor` (stage 0.2 defines the surface; execution
+//! semantics land in stages 1.10+).
 
 mod chat;
+mod checkpoint;
 mod doctor;
 mod gauge;
 mod run;
@@ -60,8 +62,40 @@ enum Commands {
         action: SessionCommands,
     },
 
+    /// Snapshot and restore the worktree with git-first checkpoints
+    /// (stage 6.1) — orphan commits on a private ref; the branch and
+    /// index are untouched, ignored files are never snapshotted, and
+    /// shell side-effects are out of scope by design.
+    Checkpoint {
+        /// Repository to checkpoint (must be a git worktree)
+        #[arg(long, value_name = "DIR", default_value = ".", global = true)]
+        workdir: PathBuf,
+
+        #[command(subcommand)]
+        action: CheckpointCommands,
+    },
+
     /// Print provider and API key status without exposing secrets
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+enum CheckpointCommands {
+    /// Snapshot tracked + untracked state as an orphan commit
+    Create {
+        /// Checkpoint message
+        #[arg(short = 'm', long, value_name = "MESSAGE")]
+        message: String,
+    },
+
+    /// List checkpoints, newest first
+    List,
+
+    /// Restore the worktree to a checkpoint (files not in it are removed)
+    Restore {
+        /// Checkpoint id as shown by `checkpoint list`
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -126,6 +160,11 @@ fn main() {
                 cli.base_url.as_deref(),
                 &env,
             ),
+        },
+        Commands::Checkpoint { workdir, action } => match action {
+            CheckpointCommands::Create { message } => checkpoint::create(workdir, message),
+            CheckpointCommands::List => checkpoint::list(workdir),
+            CheckpointCommands::Restore { id } => checkpoint::restore(workdir, id),
         },
     };
 

@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 6.1 (git-first checkpoints — `checkpoint create/list/restore`)
-- **Current phase:** 6 — Parity Features (next: 6.1; Phase 5 complete: 5.1–5.3)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model)
+- **Next action:** Stage 6.2 (compaction that fires — pre-request token threshold)
+- **Current phase:** 6 — Parity Features (next: 6.2; 6.1 complete; Phase 5 complete: 5.1–5.3)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -649,9 +649,18 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 6 — Parity Features (5 stages, ~5h)
 
-- [ ] **6.1 Git-first checkpoints** (1h) — `checkpoint create/list/restore`: snapshot of
+- [x] **6.1 Git-first checkpoints** (1h) — `checkpoint create/list/restore`: snapshot of
   tracked+untracked state to `.iris/checkpoints` (or orphan commits); shell side-effects
   explicitly out of scope, documented. Risk: Medium · Depends: 1.9
+  **Done (2026-10-20):** orphan commits on `refs/iris/checkpoints/<id>` via pure plumbing
+  (throwaway `GIT_INDEX_FILE` → `add -A` → `write-tree` → `commit-tree` → `update-ref`
+  with expected-old-zero create): the user's branch, index, and HEAD never move, and
+  `.gitignore`d files are never snapshotted — they survive `restore` untouched too
+  (privacy-consistent with 5.1). `restore` force-checks the tree out over the worktree
+  and deletes present-but-absent files (with empty-dir pruning) for exact-state rewind;
+  shell side-effects documented out of scope. `iris checkpoint create|list|restore` CLI
+  (unknown ids / non-repo workdirs fail with actionable messages). 7 new tests →
+  **380/380 green**, clippy/fmt/secret-scan clean.
 
 - [ ] **6.2 Compaction that fires** (1h) — threshold on *estimated* tokens (pre-request, not after
   failure): summarize older turns into a pinned block, keep last N raw; must preserve
