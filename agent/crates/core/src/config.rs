@@ -47,6 +47,16 @@ pub const DEFAULT_CONTEXT_WINDOW: u64 = 131_072;
 /// eight — roughly four exchanges — stay unpinned.
 pub const DEFAULT_COMPACT_KEEP: usize = 8;
 
+/// Default per-server tool budget for MCP (stage 6.3): at most this
+/// many tools from one server reach the registry (the alphabetically
+/// first ones, so the set is stable across restarts).
+pub const DEFAULT_MCP_MAX_TOOLS: usize = 32;
+
+/// Default per-tool result cap for MCP (stage 6.3): one tool call from
+/// a server contributes at most this many bytes of content (plus a
+/// fixed truncation marker), so a huge dump can't silently eat context.
+pub const DEFAULT_MCP_MAX_RESULT_BYTES: usize = 32 * 1024;
+
 /// Layered configuration values (no secrets, by design).
 ///
 /// Not `Eq`: the stage-3.3 price table carries `f64` rates.
@@ -79,6 +89,14 @@ pub struct Config {
     /// missing from the table simply reports no estimated cost.
     #[serde(default)]
     pub pricing: BTreeMap<String, ModelPrice>,
+    /// MCP servers to connect over stdio (stage 6.3): server name →
+    /// spawn command + per-server tool budget. **File-layer only**
+    /// (a map, like `permissions`). No secrets here either — server
+    /// credentials belong in the child process's own environment,
+    /// never in this file; the API key rule (D6) is unaffected: only
+    /// `OPENROUTER_API_KEY` is ever read from the environment.
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 /// USD price list for one model (stage 3.3) — per million tokens,
@@ -95,10 +113,56 @@ pub struct ModelPrice {
     pub cached_input_per_million: Option<f64>,
 }
 
+/// MCP server set (stage 6.3): `[mcp.servers."<name>"]` entries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Server name → spawn configuration. Sorted by name (a `BTreeMap`),
+    /// so servers connect in a deterministic order.
+    #[serde(default)]
+    pub servers: BTreeMap<String, McpServerConfig>,
+}
+
+/// How to spawn one MCP server over stdio, plus its tool budget
+/// (stage 6.3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Executable to spawn (looked up on `PATH` if not absolute).
+    pub command: String,
+    /// Arguments passed to `command` verbatim.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra environment variables for the child process (e.g. a
+    /// server-side token the server reads itself — never the OpenRouter
+    /// key, which has its own rule).
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Cap on tools this server may register: the alphabetically first
+    /// `max_tools` win, anything beyond is dropped with a warning.
+    #[serde(default = "default_mcp_max_tools")]
+    pub max_tools: usize,
+    /// Cap on bytes one tool result from this server may contribute
+    /// (a fixed truncation marker is appended past the cap).
+    #[serde(default = "default_mcp_max_result_bytes")]
+    pub max_result_bytes: usize,
+}
+
+impl McpServerConfig {
+    /// A server entry with default budgets — programmatic config and
+    /// tests; TOML loads use serde defaults for the same values.
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            max_tools: DEFAULT_MCP_MAX_TOOLS,
+            max_result_bytes: DEFAULT_MCP_MAX_RESULT_BYTES,
+        }
+    }
+}
+
 fn default_base_url() -> String {
     DEFAULT_PROVIDER_BASE_URL.to_string()
 }
-
 fn default_max_turns() -> u32 {
     DEFAULT_MAX_TURNS
 }
@@ -115,6 +179,14 @@ fn default_compact_keep() -> usize {
     DEFAULT_COMPACT_KEEP
 }
 
+fn default_mcp_max_tools() -> usize {
+    DEFAULT_MCP_MAX_TOOLS
+}
+
+fn default_mcp_max_result_bytes() -> usize {
+    DEFAULT_MCP_MAX_RESULT_BYTES
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -125,6 +197,7 @@ impl Default for Config {
             compact_keep: default_compact_keep(),
             permissions: BTreeMap::new(),
             pricing: BTreeMap::new(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -275,6 +348,9 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         }
         if table.contains_key("pricing") {
             config.pricing = file.pricing;
+        }
+        if table.contains_key("mcp") {
+            config.mcp = file.mcp;
         }
     }
 
@@ -705,5 +781,67 @@ mod tests {
             Some("allow"),
             "deny becomes allow"
         );
+    }
+
+    // --- mcp servers (stage 6.3) ------------------------------------------
+
+    #[test]
+    fn file_layer_loads_mcp_servers_with_budget_defaults() {
+        let cfg = load(
+            Some(
+                "[mcp.servers.demo]\n\
+                 command = \"npx\"\n\
+                 args = [\"-y\", \"server-thing\"]\n",
+            ),
+            &map(&[]),
+            None,
+        );
+        let demo = cfg.mcp.servers.get("demo").expect("server entry");
+        assert_eq!(demo.command, "npx");
+        assert_eq!(demo.args, vec!["-y", "server-thing"]);
+        assert!(demo.env.is_empty());
+        assert_eq!(demo.max_tools, DEFAULT_MCP_MAX_TOOLS);
+        assert_eq!(demo.max_result_bytes, DEFAULT_MCP_MAX_RESULT_BYTES);
+    }
+
+    #[test]
+    fn file_layer_mcp_budgets_and_env_override_defaults() {
+        let cfg = load(
+            Some(
+                "[mcp.servers.demo]\n\
+                 command = \"uvx\"\n\
+                 max_tools = 3\n\
+                 max_result_bytes = 512\n\
+                 env = { TOKEN = \"t\" }\n",
+            ),
+            &map(&[]),
+            None,
+        );
+        let demo = cfg.mcp.servers.get("demo").expect("server entry");
+        assert_eq!(demo.max_tools, 3);
+        assert_eq!(demo.max_result_bytes, 512);
+        assert_eq!(demo.env.get("TOKEN").map(String::as_str), Some("t"));
+    }
+
+    #[test]
+    fn mcp_server_without_a_command_is_a_config_error() {
+        // `command` is required — a server that can't be spawned must
+        // not look "configured" and silently do nothing.
+        let err = load_config(&ConfigInputs {
+            file_toml: Some("[mcp.servers.broken]\nargs = [\"x\"]\n"),
+            env: &map(&[]),
+            flag_base_url: None,
+        })
+        .expect_err("missing command must not parse");
+        assert!(
+            err.to_string().contains("command"),
+            "error names the missing field: {err}"
+        );
+    }
+
+    #[test]
+    fn no_mcp_table_leaves_servers_empty() {
+        let cfg = load(Some("max_turns = 7"), &map(&[]), None);
+        assert!(cfg.mcp.servers.is_empty());
     }
 }

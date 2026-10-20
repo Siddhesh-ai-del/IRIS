@@ -77,13 +77,26 @@ pub(crate) fn run(
         config,
         api_key,
         workdir,
-        registry,
+        mut registry,
     } = prepared;
+    // Stage 6.3: MCP servers live on their own runtime for the chat's
+    // lifetime — connected before the TUI starts (rmcp's service tasks
+    // ride this runtime's worker threads while the TUI runs its own),
+    // cancelled once the TUI ends. A broken server warns, never blocks.
+    let mcp_rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    let (mcp, mcp_warnings) = mcp_rt.block_on(iris_core::mcp::connect(&config.mcp, &mut registry));
+    for warning in &mcp_warnings {
+        eprintln!("[iris] mcp: {warning}");
+    }
+
     let provider = OpenAiClient::new(&config.provider_base_url, api_key);
     let opts = LoopOptions::from_config(&config, model);
     let ctx = ToolContext::with_gate(workdir, config.permission_gate());
 
-    match iris_tui::term::run(Chat {
+    let code = match iris_tui::term::run(Chat {
         provider: Arc::new(provider),
         registry: Arc::new(registry),
         ctx,
@@ -97,5 +110,7 @@ pub(crate) fn run(
             eprintln!("[iris] error: {message}");
             EXIT_ERROR
         }
-    }
+    };
+    mcp_rt.block_on(mcp.shutdown());
+    code
 }

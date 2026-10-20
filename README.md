@@ -75,7 +75,12 @@ released software.
   scrub credentials (AWS/GitHub/Anthropic/OpenAI-shaped keys, `PASSWORD=`
   assignments, private-key blocks, high-entropy tokens) from every
   transcript line *before* it is persisted (stage 5.1).
-- 📋 **MCP support** — external tools surfaced through the same registry and permission gate.
+- ✅ **MCP support** — external tools over stdio (`rmcp`, stdio-client-only
+  features) register as `mcp_<server>_<tool>` in the same registry and permission
+  gate — **ask-by-default** until a rule allows them — each server under a tool
+  budget (`max_tools`, `max_result_bytes`) so a generous server can't silently eat
+  the context window; a broken server warns and is skipped, never blocks the run
+  (stage 6.3).
 - 📋 **Hooks and custom commands** — project-local automation without forking the agent.
 
 ## Project status
@@ -98,8 +103,8 @@ none behind, the dependency graph may not grow a second HTTP client or a
 telemetry SDK, and `iris doctor` spells out exactly what leaves the machine.
 The whole privacy stack has been validated live against the real OpenRouter
 API with a free model — real streaming, a real tool call, $0.00 cost. Next
-up: Phase 6 (6.3: MCP next). Everything is built under
-test-driven development (387 tests). There are no versioned releases yet.
+up: Phase 6 (6.4: hooks next). Everything is built under
+test-driven development (403 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -113,7 +118,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
-| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.3) |
+| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.4) |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,

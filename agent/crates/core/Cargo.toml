@@ -12,6 +12,9 @@ futures = "0.3.34"
 libc = "0.2.190"
 portable-pty = "0.9.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
+# Stage 6.3: stdio MCP client only — no HTTP/SSE transports, so rmcp
+# pulls no second network stack (pinned by tests/telemetry_off.rs).
+rmcp = { version = "3.6.0", default-features = false, features = ["client", "transport-child-process"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 schemars = { version = "1.2.2", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -19,7 +22,7 @@ serde_json = "1.0.151"
 thiserror = "2.0.21"
 tiktoken-rs = "0.12.1"
 time = { version = "0.3.55", features = ["serde-well-known"] }
-tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.53.2", features = ["macros", "process", "rt-multi-thread", "signal", "time"] }
 toml = "1.1.6"
 url = "2.5.8"
 

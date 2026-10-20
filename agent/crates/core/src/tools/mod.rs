@@ -19,6 +19,6 @@ pub use permissions::{
     Resolution, builtin_policy,
 };
 pub use read::{MAX_READ_BYTES, ReadTool};
-pub use registry::{Tool, ToolContext, ToolError, ToolRegistry};
+pub use registry::{Tool, ToolContext, ToolError, ToolFuture, ToolRegistry};
 pub use shell::{DEFAULT_TIMEOUT_SECS, MAX_OUTPUT_BYTES, MAX_TIMEOUT_SECS, RunCommandTool};
 pub use write::WriteTool;

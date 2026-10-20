@@ -181,7 +181,7 @@ pub(crate) fn execute(
         config,
         api_key,
         workdir,
-        registry,
+        mut registry,
     } = prepared;
     let ctx = ToolContext::with_gate(workdir, config.permission_gate());
     let client = OpenAiClient::new(&config.provider_base_url, api_key);
@@ -192,6 +192,12 @@ pub(crate) fn execute(
         .enable_all()
         .build()
         .expect("tokio runtime");
+    // Stage 6.3: MCP servers attach to the registry before the loop;
+    // a server that fails warns on stderr and is skipped, never blocks.
+    let (mcp, mcp_warnings) = rt.block_on(iris_core::mcp::connect(&config.mcp, &mut registry));
+    for warning in &mcp_warnings {
+        eprintln!("[iris] mcp: {warning}");
+    }
     let mut saw_text = false;
     let mut ends_with_newline = true;
     let outcome = rt.block_on(agent_loop::run_recorded(
@@ -271,6 +277,9 @@ pub(crate) fn execute(
             Ok(appended?)
         },
     ));
+    // Stage 6.3: the loop is over — cancel MCP children before the
+    // transcript is finalized (every path passes through here).
+    rt.block_on(mcp.shutdown());
     if saw_text && !ends_with_newline {
         println!();
     }

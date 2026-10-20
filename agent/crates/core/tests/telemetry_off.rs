@@ -1,4 +1,4 @@
-//! Stage 5.3: telemetry-off guarantee. Two pins:
+//! Stage 5.3: telemetry-off guarantee. Three pins:
 //!
 //! 1. **Runtime** — a full scripted run (streaming provider + real tool
 //!    execution) opens sockets only for the configured provider host,
@@ -7,6 +7,9 @@
 //! 2. **Dependency graph** — the workspace may not grow a second HTTP
 //!    client or a telemetry SDK. reqwest, used solely by the provider
 //!    client, is the only network stack allowed anywhere.
+//! 3. **rmcp features** (stage 6.3) — the MCP client is stdio-only:
+//!    `default-features = false` plus `client` +
+//!    `transport-child-process`, never an HTTP/SSE transport feature.
 
 use std::fs;
 use std::path::PathBuf;
@@ -240,4 +243,50 @@ fn reqwest_is_the_workspaces_only_network_stack() {
             }
         }
     }
+}
+
+/// Stage 6.3: rmcp is pinned to a stdio-only client feature set. An
+/// HTTP/SSE transport feature would give the workspace a second dialer
+/// and a second wire protocol to reason about — the dependency-graph
+/// pin above only sees crate *names*, so features need their own check.
+#[test]
+fn rmcp_is_a_stdio_only_client() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("core")
+        .join("Cargo.toml");
+    let text = fs::read_to_string(&manifest).expect("core manifest readable");
+    let table: toml::Table = toml::from_str(&text).expect("manifest parses as TOML");
+
+    let rmcp = table
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .and_then(|deps| deps.get("rmcp"))
+        .expect("iris-core declares rmcp (stage 6.3)");
+    let spec = rmcp.as_table().expect("rmcp is an inline dependency spec");
+
+    assert_eq!(
+        spec.get("default-features"),
+        Some(&toml::Value::Boolean(false)),
+        "rmcp must disable default features (no server, no macros, no HTTP)"
+    );
+    let features = spec
+        .get("features")
+        .and_then(toml::Value::as_array)
+        .expect("rmcp declares its feature list")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect::<Vec<_>>();
+    let allowed = ["client", "transport-child-process"];
+    for feature in &features {
+        assert!(
+            allowed.contains(feature),
+            "rmcp feature `{feature}` is not stdio-client scope — MCP stays \
+             child-process stdio, no second network stack"
+        );
+    }
+    assert!(
+        features.contains(&"client") && features.contains(&"transport-child-process"),
+        "the stdio client needs both `client` and `transport-child-process`: {features:?}"
+    );
 }

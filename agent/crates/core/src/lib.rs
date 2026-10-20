@@ -8,6 +8,7 @@ pub mod assembly;
 pub mod checkpoint;
 pub mod compact;
 pub mod config;
+pub mod mcp;
 pub mod metrics;
 pub mod provider;
 pub mod redact;

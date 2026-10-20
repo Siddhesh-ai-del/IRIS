@@ -21,13 +21,26 @@ use crate::provider::ToolSpec;
 use crate::types::ToolResult;
 
 /// Type-erased tool future handed back by the registry's dispatch.
-type ToolFuture = Pin<Box<dyn Future<Output = Result<ToolResult, ToolError>> + Send>>;
+pub type ToolFuture = Pin<Box<dyn Future<Output = Result<ToolResult, ToolError>> + Send>>;
 
 /// Boundary-check closure registered per tool (no dispatch).
 type ValidateFn = Box<dyn Fn(&Value) -> Result<(), ToolError> + Send + Sync>;
 
 /// Dispatch closure registered per tool: raw args → boxed future.
 type RunFn = Box<dyn Fn(ToolContext, Value) -> ToolFuture + Send + Sync>;
+
+/// Boundary rule for dynamically described tools (stage 6.3): their
+/// arguments are a JSON object, or `null` when the model passed none.
+fn require_object(tool: &str, args: &Value) -> Result<(), ToolError> {
+    if args.is_object() || args.is_null() {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidArgs {
+            tool: tool.to_string(),
+            message: format!("expected a JSON object, got {args}"),
+        })
+    }
+}
 
 /// Errors raised while locating, validating, or running a tool call.
 ///
@@ -198,6 +211,45 @@ impl ToolRegistry {
         };
 
         // Upsert: same name replaces the previous registration.
+        self.tools.retain(|old| old.spec.name != spec.name);
+        self.tools.push(RegisteredTool {
+            spec,
+            validate,
+            run,
+        });
+    }
+
+    /// Register a **dynamically described** tool (stage 6.3, MCP): the
+    /// spec comes from a server at runtime instead of a typed `Args`
+    /// struct, and dispatch is a plain async closure.
+    ///
+    /// Boundary validation is the server's job — it owns the schema and
+    /// answers bad arguments with an error result (this seam accepts any
+    /// JSON object). The permission gate still guards dispatch exactly
+    /// as for builtins, keyed by `spec.name`.
+    pub fn register_dynamic(
+        &mut self,
+        spec: ToolSpec,
+        run: impl Fn(ToolContext, Value) -> ToolFuture + Send + Sync + 'static,
+    ) {
+        // Boundary: dynamic schemas are the server's, but MCP
+        // arguments are always a JSON object (or absent — null), so
+        // anything else is rejected here before dispatch.
+        let validate: ValidateFn = {
+            let tool = spec.name.clone();
+            Box::new(move |args| require_object(&tool, args))
+        };
+        let run: RunFn = {
+            let tool = spec.name.clone();
+            Box::new(move |ctx, args| {
+                if let Err(err) = require_object(&tool, &args) {
+                    return Box::pin(std::future::ready(Err(err)));
+                }
+                run(ctx, args)
+            })
+        };
+
+        // Same upsert as `register`: same name replaces.
         self.tools.retain(|old| old.spec.name != spec.name);
         self.tools.push(RegisteredTool {
             spec,
