@@ -22,6 +22,9 @@
 //!   state and its transitions exist (and are tested) now, so 4.5 only
 //!   has to plug a resolver in.
 
+use std::collections::BTreeMap;
+
+use iris_core::commands::ProjectCommand;
 use iris_core::metrics::TurnMetrics;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui_textarea::TextArea;
@@ -151,6 +154,9 @@ pub struct App {
     hunk_cursor: usize,
     /// Last turn's metrics (stage 4.4's status bar consumes these).
     last_metrics: Option<TurnMetrics>,
+    /// Project commands from `.iris/commands/*.md` (stage 6.5) —
+    /// loaded by the shell, expanded here at dispatch.
+    project_commands: BTreeMap<String, ProjectCommand>,
 }
 
 impl Default for App {
@@ -184,6 +190,7 @@ impl App {
             pending_diff: None,
             hunk_cursor: 0,
             last_metrics: None,
+            project_commands: BTreeMap::new(),
         }
     }
 
@@ -201,6 +208,13 @@ impl App {
             max_tokens_budget,
             ..Self::new()
         }
+    }
+
+    /// Attach the project commands discovered in `.iris/commands`
+    /// (stage 6.5) — the shell loads them, this only stores the map.
+    pub fn with_commands(mut self, commands: BTreeMap<String, ProjectCommand>) -> Self {
+        self.project_commands = commands;
+        self
     }
 
     /// The current state.
@@ -576,8 +590,7 @@ impl App {
         self.composer = TextArea::default();
 
         if prompt.starts_with('/') {
-            self.dispatch_command(&prompt);
-            return None;
+            return self.dispatch_command(&prompt);
         }
         self.state = AppState::Streaming;
         self.running = true;
@@ -585,23 +598,79 @@ impl App {
     }
 
     /// Slash commands run here, never in the loop — no tokens, no
-    /// transcript write, no run state.
-    fn dispatch_command(&mut self, text: &str) {
+    /// transcript write, no run state — **except** project commands
+    /// (stage 6.5): `/name args…` expands to its template and comes
+    /// back as `Some(prompt)` to run like any other input. Builtins
+    /// return `None`.
+    fn dispatch_command(&mut self, text: &str) -> Option<String> {
         match text {
             "/help" => {
-                self.status = COMMANDS
+                let mut lines: Vec<String> = COMMANDS
                     .iter()
                     .map(|(name, help)| format!("{name} — {help}"))
-                    .collect::<Vec<_>>()
-                    .join(" · ");
+                    .collect();
+                for (name, command) in &self.project_commands {
+                    let what = if command.description.is_empty() {
+                        "project command"
+                    } else {
+                        command.description.as_str()
+                    };
+                    lines.push(format!("/{name} — {what}"));
+                }
+                self.status = lines.join(" · ");
+                None
             }
-            "/quit" => self.quit = true,
+            "/quit" => {
+                self.quit = true;
+                None
+            }
             "/clear" => {
                 self.transcript.clear();
                 self.scroll_from_bottom = 0;
                 self.status = "screen cleared".into();
+                None
             }
-            other => self.status = format!("unknown command: {other} — try /help"),
+            other => self.project_command(other),
+        }
+    }
+
+    /// A `.iris/commands` expansion (stage 6.5): bind the remaining
+    /// words positionally and hand the expanded template back as the
+    /// next prompt. Anything that does not fit is a status-line usage
+    /// error — nothing is sent, nothing runs.
+    fn project_command(&mut self, text: &str) -> Option<String> {
+        let mut parts = text.split_whitespace();
+        let name = parts.next().unwrap_or_default();
+        let Some(key) = name.strip_prefix('/') else {
+            self.status = format!("unknown command: {text} — try /help");
+            return None;
+        };
+        let Some(command) = self.project_commands.get(key) else {
+            self.status = format!("unknown command: {text} — try /help");
+            return None;
+        };
+        let argv: Vec<String> = parts.map(str::to_string).collect();
+        match iris_core::commands::expand(command, &argv) {
+            Ok(expanded) => {
+                self.state = AppState::Streaming;
+                self.running = true;
+                Some(expanded)
+            }
+            Err(_) => {
+                let usage = command
+                    .args
+                    .iter()
+                    .map(|arg| format!("<{arg}>"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let usage = if usage.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {usage}")
+                };
+                self.status = format!("usage: /{key}{usage}");
+                None
+            }
         }
     }
 
@@ -898,6 +967,55 @@ mod tests {
         type_text(&mut app, "/quit");
         assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
         assert!(app.should_quit());
+    }
+
+    /// A one-arg `/review` template, built directly — dispatch never
+    /// touches the filesystem.
+    fn review_app() -> App {
+        App::new().with_commands(std::collections::BTreeMap::from([(
+            "review".to_string(),
+            ProjectCommand {
+                description: "Review a diff".into(),
+                args: vec!["scope".into()],
+                body: "Review the {{scope}} diff.".into(),
+            },
+        )]))
+    }
+
+    #[test]
+    fn project_commands_expand_and_go_out_as_the_next_prompt() {
+        let mut app = review_app();
+        type_text(&mut app, "/review backend");
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some("Review the backend diff.".to_string()),
+            "the expanded template is the prompt that goes out"
+        );
+        assert!(app.is_running(), "it enters the run state like any prompt");
+        assert_eq!(
+            app.history.last().map(String::as_str),
+            Some("/review backend"),
+            "history keeps what was typed, not the expansion"
+        );
+    }
+
+    #[test]
+    fn a_wrong_argument_count_is_a_usage_error_not_a_run() {
+        let mut app = review_app();
+        type_text(&mut app, "/review");
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+        assert_eq!(app.status(), "usage: /review <scope>");
+        assert!(!app.is_running(), "nothing is sent");
+    }
+
+    #[test]
+    fn help_lists_project_commands_alongside_the_builtins() {
+        let mut app = review_app();
+        type_text(&mut app, "/help");
+        assert!(app.handle_key(key(KeyCode::Enter)).is_none());
+        let status = app.status().to_string();
+        assert!(status.contains("/help — list these commands"), "{status}");
+        assert!(status.contains("/review — Review a diff"), "{status}");
     }
 
     #[test]

@@ -44,7 +44,7 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::app::{App, PermissionAnswer};
+use crate::app::{App, COMMANDS, PermissionAnswer};
 use crate::ask::{OldContentLoader, PromptingResolver};
 use crate::events::{self, AppEvent};
 use crate::ui;
@@ -81,6 +81,18 @@ pub fn run<P>(chat: Chat<P>) -> Result<(), String>
 where
     P: Provider + Send + Sync + 'static,
 {
+    // Stage 6.5: project commands from `.iris/commands/*.md`, loaded
+    // before the screen switches so warnings are visible (the MCP ones
+    // chat.rs prints a moment earlier). Builtin names are reserved.
+    let reserved: Vec<&str> = COMMANDS
+        .iter()
+        .map(|(name, _)| name.trim_start_matches('/'))
+        .collect();
+    let (project_commands, project_warnings) =
+        iris_core::commands::load(&chat.ctx.workspace_root, &reserved);
+    for warning in &project_warnings {
+        eprintln!("[iris] {warning}");
+    }
     enable_raw_mode().map_err(|err| format!("cannot enter raw mode: {err}"))?;
     let _restore = RestoreGuard;
     // Bracketed paste makes terminals deliver pastes as one `Event::
@@ -125,7 +137,8 @@ where
         &chat.opts.model,
         chat.opts.max_turns,
         chat.opts.max_tokens_budget,
-    );
+    )
+    .with_commands(project_commands);
     spin(chat, app, rx, tx, answer_tx, ask, &rt, &mut terminal)
 }
 

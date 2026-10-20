@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 6.5 (custom commands/skills — `.iris/commands/*.md` frontmatter → prompt templates; `/help` lists them)
-- **Current phase:** 6 — Parity Features (next: 6.5; 6.1–6.4 complete; Phase 5 complete: 5.1–5.3)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20)
+- **Next action:** Stage 7.1 (HTTP cassette layer — record/replay on httpmock covering streaming + tool loops)
+- **Current phase:** 7 — Quality Gate (next: 7.1; Phase 6 complete: 6.1–6.5)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -726,8 +726,26 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   `from_config`, so `run`/`resume`/`chat` all share it. 10 new tests → **413/413
   green**, clippy/fmt/secret-scan clean.
 
-- [ ] **6.5 Custom commands/skills** (1h) — markdown files in `.iris/commands/*.md` with
+- [x] **6.5 Custom commands/skills** (1h) — markdown files in `.iris/commands/*.md` with
   frontmatter args → prompt templates; `/help` lists them. Risk: Low · Depends: 4.2
+  **Done (2026-10-20):** `iris_core::commands` — best-effort loader (missing dir →
+  empty map, each broken file → warning, rest still load — 6.3's MCP posture) over a
+  strict small dialect: optional `---` frontmatter with only `description` and
+  `args: [a, b]` (inline identifier list; unknown keys, unterminated frontmatter,
+  bad/duplicate args, empty body fail *that one file* loudly). File stem = command
+  name; builtin names (`/help` `/quit` `/clear`) are reserved — shadowing files are
+  skipped with a warning. `expand` binds argv positionally with **exact arity**
+  (mismatch → status-line `usage: /name <arg>…`, nothing sent) and replaces `{{arg}}`
+  (undeclared `{{x}}` stays literal). The shell loads the map before the screen
+  switch (warnings eprintln'd like MCP's) and the App stores it via
+  `with_commands`; `/name args…` expands to a prompt that goes out like any other
+  input (history keeps what was typed; the transcript records the expansion), and
+  `/help` lists project commands after the builtins. Headless run stays out of scope
+  (composer-only, per plan). Also fixed a latent ~5% flake in 5.2's redaction
+  property: the generator planted `github_pat_` bodies from a charset wider than the
+  rule's documented `[A-Za-z0-9_]` (hyphens cannot occur in real PATs) — aligned the
+  generator to the contract and pinned the near-miss boundary as a unit test. 12 new
+  tests → **426/426 green**, clippy/fmt/secret-scan clean.
 
 ### Phase 7 — Quality Gate (4 stages, ~4h)
 

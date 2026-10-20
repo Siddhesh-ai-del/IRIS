@@ -85,30 +85,36 @@ released software.
   `on_turn_end`, and `on_compact` with a redacted JSON payload on stdin, a hard
   per-command timeout, and advisory-only failures — a broken, hanging, or missing
   hook warns and is killed, it never stops the run (stage 6.4).
-- 📋 **Custom commands** — project-local prompt templates without forking the agent.
+- ✅ **Custom commands** — project-local prompt templates in
+  `.iris/commands/*.md` (frontmatter `description` + `args: [a, b]` →
+  `{{arg}}` expansion) dispatched as `/name args…` from the composer and
+  listed by `/help`; broken files warn and are skipped, never block
+  (stage 6.5).
 
 ## Project status
 
-**IRIS is pre-release and under active development.** Phases 0 through 5 of the
+**IRIS is pre-release and under active development.** Phases 0 through 6 of the
 [implementation plan](agent/PLAN.md) are complete: the Cargo workspace, layered configuration, the OpenRouter client with SSE
 streaming, five tools behind a config-backed permission gate, the headless agent
 loop, durable sessions (crash-safe transcripts, `sessions list` / `sessions
 resume`, a rebuildable index), and cache-first prompt assembly with per-turn cost
-metrics have all landed — along with the full terminal UI. `iris chat` is usable
-today — streaming markdown transcript, multiline composer with history, gauge
-status bar, the interactive permission prompt (`y` / `n` / always-allow, with
-rules persisted to config), and a hunk diff view where file edits can be
-accepted or rejected per hunk (a partial accept runs only the accepted hunks).
-Secrets are redacted at write time: every transcript line passes a redactor
-(fixed-shape key patterns, credential assignments, private-key blocks, an
-entropy heuristic) before it is fsynced, and the telemetry-off guarantee is
-tested: a full run opens sockets only for the configured provider and leaves
-none behind, the dependency graph may not grow a second HTTP client or a
-telemetry SDK, and `iris doctor` spells out exactly what leaves the machine.
-The whole privacy stack has been validated live against the real OpenRouter
-API with a free model — real streaming, a real tool call, $0.00 cost. Next
-up: Phase 6 (6.5: custom commands next). Everything is built under
-test-driven development (413 tests). There are no versioned releases yet.
+metrics have all landed — along with the full terminal UI and the Phase 6 parity
+features: git-first checkpoints, 70% context compaction, MCP stdio servers behind
+the same permission gate, advisory shell hooks, and project-local custom commands
+from `.iris/commands/*.md`. `iris chat` is usable today — streaming markdown
+transcript, multiline composer with history, gauge status bar, the interactive
+permission prompt (`y` / `n` / always-allow, with rules persisted to config), and
+a hunk diff view where file edits can be accepted or rejected per hunk (a partial
+accept runs only the accepted hunks). Secrets are redacted at write time: every
+transcript line passes a redactor (fixed-shape key patterns, credential
+assignments, private-key blocks, an entropy heuristic) before it is fsynced, and
+the telemetry-off guarantee is tested: a full run opens sockets only for the
+configured provider and leaves none behind, the dependency graph may not grow a
+second HTTP client or a telemetry SDK, and `iris doctor` spells out exactly what
+leaves the machine. The whole privacy stack has been validated live against the
+real OpenRouter API with a free model — real streaming, a real tool call, $0.00
+cost. Next up: Phase 7 (7.1: HTTP cassettes next). Everything is built under
+test-driven development (426 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -122,8 +128,8 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
-| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.5) |
-| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
+| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | ✅ Complete |
+| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | 🔵 In progress (7.1) |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
 and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
