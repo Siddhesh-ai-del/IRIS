@@ -7,9 +7,10 @@
 //!    so a resume replaying a scrubbed transcript re-scrubs to the
 //!    same bytes.
 //!
-//! Planted secrets respect each rule's documented minimum body length —
-//! the redactor deliberately ignores shorter near-misses (too many
-//! false positives otherwise), so the property pins what it promises.
+//! Planted secrets respect each rule's documented minimum body length
+//! *and body charset* — the redactor deliberately ignores shorter or
+//! off-shape near-misses (too many false positives otherwise), so the
+//! property pins what it promises.
 
 use iris_core::redact::redact_text;
 use proptest::prelude::*;
@@ -27,10 +28,14 @@ fn arb_secret() -> impl Strategy<Value = String> {
     const UPPER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     const TOKEN: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
     const LOWER: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
+    /// The `github_pat_` rule's body charset — `[A-Za-z0-9_]`, no
+    /// hyphen: real fine-grained PATs never contain one.
+    const ALNUM_UNDERSCORE: &str =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     prop_oneof![
         body(UPPER, 16, 40).prop_map(|b| format!("AKIA{b}")),
         body(ALNUM, 36, 40).prop_map(|b| format!("ghp_{b}")),
-        body(TOKEN, 40, 44).prop_map(|b| format!("github_pat_{b}")),
+        body(ALNUM_UNDERSCORE, 40, 44).prop_map(|b| format!("github_pat_{b}")),
         body(TOKEN, 16, 40).prop_map(|b| format!("sk-ant-{b}")),
         body(ALNUM, 32, 40).prop_map(|b| format!("sk-or-v1-{b}")),
         body(TOKEN, 24, 40).prop_map(|b| format!("sk-{b}")),

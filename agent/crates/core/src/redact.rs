@@ -522,6 +522,16 @@ mod tests {
     }
 
     #[test]
+    fn hyphenated_github_pat_near_misses_survive_by_design() {
+        // The `github_pat_` rule's body charset is `[A-Za-z0-9_]` — a
+        // hyphen can never appear in a real fine-grained PAT, so an
+        // off-shape near-miss stays visible on purpose (false-positive
+        // tradeoff, pinned after the stage-6.5 property flake).
+        let near_miss = format!("github_pat_{}-{}", "a".repeat(8), "a".repeat(32));
+        assert_eq!(redact_text(&near_miss), near_miss);
+    }
+
+    #[test]
     fn redaction_is_idempotent() {
         let messy = "PASSWORD=hunter2 key=sk-or-v1-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 tok=Xk39Qa7pLm2Zt8Vr4Nb6Cw1DyHgF";
         let once = redact_text(messy).into_owned();
