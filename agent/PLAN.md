@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 6.2 (compaction that fires — pre-request token threshold)
-- **Current phase:** 6 — Parity Features (next: 6.2; 6.1 complete; Phase 5 complete: 5.1–5.3)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20)
+- **Next action:** Stage 6.3 (MCP via `rmcp` — stdio client, tools through registry + gate)
+- **Current phase:** 6 — Parity Features (next: 6.3; 6.1–6.2 complete; Phase 5 complete: 5.1–5.3)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -662,10 +662,23 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   (unknown ids / non-repo workdirs fail with actionable messages). 7 new tests →
   **380/380 green**, clippy/fmt/secret-scan clean.
 
-- [ ] **6.2 Compaction that fires** (1h) — threshold on *estimated* tokens (pre-request, not after
+- [x] **6.2 Compaction that fires** (1h) — threshold on *estimated* tokens (pre-request, not after
   failure): summarize older turns into a pinned block, keep last N raw; must preserve
   prefix-invariance rules; test asserts it triggers at 70% and survives resume.
   Risk: **High** (the #1 documented pain) · Depends: 3.2, 3.1
+  **Done (2026-10-20):** the loop assembles and estimates **before** every request and folds
+  at ≥70% of `context_window` (exact integer boundary: `due()` fires at 700/1000 per 1000,
+  refuses 699; `window = 0` = off). Summarizer = one non-streaming, no-tools,
+  temperature-0 call through the run's own provider — no signature churn — with its tokens
+  charged to the run budget; the summary is pinned as a message through the one shared
+  builder. `plan()` never splits a `tool_use`/`tool_result` pair (boundary walks back, one
+  fewer fold when it must), never touches system messages (no cache bust — asserted), keeps
+  the last `keep` raw. New `compact` transcript event (schema v0 + KNOWN_TYPES + D5 doc);
+  resume re-applies the *same* plan/builder — the resumed context is byte-identical to the
+  request the provider actually saw (asserted end-to-end). Summary passes the 5.1
+  redaction chokepoint (asserted). Config: `context_window` (default 131_072, 0 disables)
+  + `compact_keep` (default 8), layered from TOML and `IRIS_CONTEXT_WINDOW` /
+  `IRIS_COMPACT_KEEP`. 7 new tests → **387/387 green**, clippy/fmt/secret-scan clean.
 
 - [ ] **6.3 MCP via `rmcp`** (1h) — stdio client, tools surfaced through the same registry +
   permission gate; per-server tool budget so MCP can't silently eat context.

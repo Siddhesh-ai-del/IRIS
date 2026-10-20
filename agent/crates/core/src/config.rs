@@ -35,6 +35,18 @@ pub const DEFAULT_MAX_TURNS: u32 = 50;
 /// the sum of the usage reported by every response in the run.
 pub const DEFAULT_MAX_TOKENS_BUDGET: u64 = 250_000;
 
+/// Default context window for compaction (stage 6.2): 128k — a
+/// common denominator across hosted models. Override with
+/// `context_window` (`0` turns compaction off); there is no
+/// per-model table yet, so a conservative guess compacts a big
+/// window early (cheap) rather than a small window late (a provider
+/// rejection).
+pub const DEFAULT_CONTEXT_WINDOW: u64 = 131_072;
+
+/// Default raw messages kept past a compaction (stage 6.2): the last
+/// eight — roughly four exchanges — stay unpinned.
+pub const DEFAULT_COMPACT_KEEP: usize = 8;
+
 /// Layered configuration values (no secrets, by design).
 ///
 /// Not `Eq`: the stage-3.3 price table carries `f64` rates.
@@ -49,6 +61,13 @@ pub struct Config {
     /// Cumulative `total_tokens` budget per run (loop, stage 1.9).
     #[serde(default = "default_max_tokens_budget")]
     pub max_tokens_budget: u64,
+    /// Model context window in tokens for compaction (stage 6.2).
+    /// `0` disables compaction entirely.
+    #[serde(default = "default_context_window")]
+    pub context_window: u64,
+    /// Non-system messages kept raw past a compaction (stage 6.2).
+    #[serde(default = "default_compact_keep")]
+    pub compact_keep: usize,
     /// Per-tool permission policy overlay — `tool = "allow" | "deny" |
     /// "ask"` (stage 1.9). Unlisted tools fall back to the built-in
     /// policy: reads allowed, everything else asks.
@@ -88,12 +107,22 @@ fn default_max_tokens_budget() -> u64 {
     DEFAULT_MAX_TOKENS_BUDGET
 }
 
+fn default_context_window() -> u64 {
+    DEFAULT_CONTEXT_WINDOW
+}
+
+fn default_compact_keep() -> usize {
+    DEFAULT_COMPACT_KEEP
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             provider_base_url: default_base_url(),
             max_turns: default_max_turns(),
             max_tokens_budget: default_max_tokens_budget(),
+            context_window: default_context_window(),
+            compact_keep: default_compact_keep(),
             permissions: BTreeMap::new(),
             pricing: BTreeMap::new(),
         }
@@ -235,6 +264,12 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         if table.contains_key("max_tokens_budget") {
             config.max_tokens_budget = file.max_tokens_budget;
         }
+        if table.contains_key("context_window") {
+            config.context_window = file.context_window;
+        }
+        if table.contains_key("compact_keep") {
+            config.compact_keep = file.compact_keep;
+        }
         if table.contains_key("permissions") {
             config.permissions = file.permissions;
         }
@@ -250,6 +285,27 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         .filter(|v| !v.is_empty())
     {
         config.provider_base_url = url.to_string();
+    }
+
+    // Stage 6.2: scalar compaction knobs. A value that doesn't parse
+    // is ignored — a typo must not take the whole config load down.
+    if let Some(window) = inputs
+        .env
+        .get("IRIS_CONTEXT_WINDOW")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        && let Ok(parsed) = window.parse::<u64>()
+    {
+        config.context_window = parsed;
+    }
+    if let Some(keep) = inputs
+        .env
+        .get("IRIS_COMPACT_KEEP")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        && let Ok(parsed) = keep.parse::<usize>()
+    {
+        config.compact_keep = parsed;
     }
 
     if let Some(url) = inputs

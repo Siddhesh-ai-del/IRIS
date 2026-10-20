@@ -233,6 +233,11 @@ pub(crate) fn execute(
                 };
                 eprintln!("[iris] cache-bust: {what} changed — prompt cache invalidated");
             }
+            LoopEvent::Compact { folded, kept } => {
+                eprintln!(
+                    "[iris] context compacted: {folded} earlier messages folded into a summary (kept the last {kept})"
+                );
+            }
             // Stage 3.4: the live gauge — one status line per turn on
             // stderr (stdout stays the model's, pipeable); the stage-4
             // TUI renders the same TurnMetrics over channels.
@@ -253,6 +258,15 @@ pub(crate) fn execute(
                     input_token_delta,
                 }),
                 Recorded::Metrics(metrics) => writer.append(&Event::TurnMetrics(metrics)),
+                Recorded::Compact {
+                    summary,
+                    folded,
+                    keep,
+                } => writer.append(&Event::Compact {
+                    summary,
+                    folded,
+                    keep,
+                }),
             };
             Ok(appended?)
         },
@@ -304,6 +318,10 @@ pub(crate) fn execute(
         }
         Err(RunError::Transcript(err)) => {
             eprintln!("[iris] error: transcript write failed: {err}");
+            EXIT_ERROR
+        }
+        Err(RunError::Compact(err)) => {
+            eprintln!("[iris] error: compaction failed: {err}");
             EXIT_ERROR
         }
     }

@@ -311,6 +311,15 @@ fn transcript_event(recorded: Recorded) -> TranscriptEvent {
             input_token_delta,
         },
         Recorded::Metrics(metrics) => TranscriptEvent::TurnMetrics(metrics),
+        Recorded::Compact {
+            summary,
+            folded,
+            keep,
+        } => TranscriptEvent::Compact {
+            summary,
+            folded,
+            keep,
+        },
     }
 }
 

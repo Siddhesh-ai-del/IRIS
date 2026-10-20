@@ -228,6 +228,7 @@ fn options(max_turns: u32, max_tokens_budget: u64) -> LoopOptions {
         max_tokens: None,
         temperature: None,
         price: None,
+        compact: None,
     }
 }
 
@@ -623,6 +624,9 @@ async fn observer_sees_streamed_text_and_tool_lifecycle() {
             // Timing-dependent (stage 3.3) — this assertion pins event
             // *ordering*, so metrics ride their own event instead.
             LoopEvent::Metrics(_) => return,
+            // Stage 6.2 — never fires here (`compact: None` in these
+            // runs); its own suite asserts the real line.
+            LoopEvent::Compact { .. } => "compact".to_string(),
         };
         sink.lock().unwrap().push(line);
     };
@@ -889,6 +893,9 @@ async fn run_recorded_mirrors_the_conversation_in_transcript_order() {
         .iter()
         .filter_map(|event| match event {
             Recorded::Message(msg) => Some(msg),
+            // Never in these runs (`compact: None`) — the stage-6.2
+            // suite owns this record kind.
+            Recorded::Compact { .. } => None,
             Recorded::Usage { .. } | Recorded::Metrics(_) => None,
         })
         .collect();

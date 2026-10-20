@@ -403,6 +403,18 @@ fn redact_block(block: &ContentBlock) -> ContentBlock {
 pub fn redact_event(event: Event) -> Event {
     match event {
         Event::Message(message) => Event::Message(redact_message(&message)),
+        // Stage 6.2: a summary *describes* the conversation and can
+        // echo a credential verbatim — it passes the same text passes
+        // the chokepoint runs on messages.
+        Event::Compact {
+            summary,
+            folded,
+            keep,
+        } => Event::Compact {
+            summary: redact_text(&summary).into_owned(),
+            folded,
+            keep,
+        },
         other => other,
     }
 }

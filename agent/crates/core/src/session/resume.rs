@@ -28,13 +28,25 @@ pub fn rehydrate(events: &[Event]) -> Result<Vec<Message>, SessionError> {
     let Some(Event::SessionStart { .. }) = events.first() else {
         return Err(SessionError::NoSessionStart);
     };
-    let mut messages: Vec<Message> = events
-        .iter()
-        .filter_map(|event| match event {
-            Event::Message(msg) => Some(msg.clone()),
-            _ => None,
-        })
-        .collect();
+    let mut messages: Vec<Message> = Vec::new();
+    for event in events {
+        match event {
+            Event::Message(msg) => messages.push(msg.clone()),
+            Event::Compact { summary, keep, .. } => {
+                // Re-apply the recorded fold with the same planner the
+                // live loop used: same messages, same `keep`, same
+                // [`summary_message`] builder — the resumed context is
+                // byte-identical to what the loop actually sent.
+                // `None` means nothing is safely foldable here (an
+                // already-compacted or inconsistent transcript) — leave
+                // the conversation untouched rather than guess.
+                if let Some(plan) = crate::compact::plan(&messages, *keep) {
+                    messages = crate::compact::apply(messages, plan, summary);
+                }
+            }
+            _ => {}
+        }
+    }
 
     // Find every assistant message with unanswered tool calls (most
     // often the last one — SIGKILL mid-call), then splice the repairs

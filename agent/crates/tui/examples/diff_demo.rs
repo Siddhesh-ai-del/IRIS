@@ -187,6 +187,7 @@ fn main() -> Result<(), String> {
             max_tokens: None,
             temperature: None,
             price: None,
+            compact: None,
         },
         writer,
         system: Message::text(Role::System, "You are IRIS in demo mode."),

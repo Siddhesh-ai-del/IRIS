@@ -30,6 +30,10 @@ pub enum AppEvent {
     },
     /// This turn's measurements (stage 3.3).
     Metrics(TurnMetrics),
+    /// The loop folded older turns into a pinned summary before the
+    /// request (stage 6.2) — `folded` messages condensed, `kept` left
+    /// raw.
+    Compacted { folded: usize, kept: usize },
     /// The loop's resolver is blocked asking the user (stages 4.5/4.6).
     PermissionRequested {
         id: String,
@@ -73,6 +77,7 @@ impl From<LoopEvent<'_>> for AppEvent {
                 tools_changed,
             },
             LoopEvent::Metrics(metrics) => AppEvent::Metrics(metrics),
+            LoopEvent::Compact { folded, kept } => AppEvent::Compacted { folded, kept },
         }
     }
 }

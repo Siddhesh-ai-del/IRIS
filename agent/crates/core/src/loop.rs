@@ -47,6 +47,9 @@ pub struct LoopOptions {
     /// 3.3), resolved once — `None` for unlisted models (no estimated
     /// cost, never a hardcoded price).
     pub price: Option<crate::config::ModelPrice>,
+    /// Stage 6.2 compaction knobs — `None` disables folding entirely
+    /// (config `context_window = 0`, or a test that must not compact).
+    pub compact: Option<crate::compact::CompactOpts>,
 }
 
 impl LoopOptions {
@@ -62,6 +65,10 @@ impl LoopOptions {
             max_tokens_budget: config.max_tokens_budget,
             max_tokens: None,
             temperature: None,
+            compact: (config.context_window > 0).then_some(crate::compact::CompactOpts {
+                window: config.context_window,
+                keep: config.compact_keep,
+            }),
         }
     }
 }
@@ -89,6 +96,11 @@ pub enum LoopEvent<'a> {
         system_changed: bool,
         tools_changed: bool,
     },
+    /// Compaction fired before this turn's request (stage 6.2):
+    /// `folded` older messages were pinned into a summary, `kept`
+    /// raw ones remain. The cacheable prefix is unaffected — this is
+    /// a message-history fold, not a system/tools change.
+    Compact { folded: usize, kept: usize },
     /// This turn's metrics, right after they were recorded (stage 3.3)
     /// — what the stage-3.4 gauge and the TUI status line render.
     Metrics(TurnMetrics),
@@ -136,6 +148,15 @@ pub enum Recorded {
     /// This turn's measurements (stage 3.3) — ttft, generation speed,
     /// cache hit and cost — recorded right after the turn's usage.
     Metrics(TurnMetrics),
+    /// A compaction applied before the next request (stage 6.2): the
+    /// pinned summary plus the fold it describes. Recorded as a
+    /// `compact` transcript event — resume replays the same fold, so
+    /// the compacted context survives a restart byte-identically.
+    Compact {
+        summary: String,
+        folded: usize,
+        keep: usize,
+    },
 }
 
 /// Why a recording run stopped.
@@ -149,6 +170,11 @@ pub enum RunError {
     /// a transcript missing middle lines is worse than a failed run.
     #[error("cannot record session transcript: {0}")]
     Transcript(#[from] WriterError),
+    /// Compaction failed (stage 6.2): the summarizer's provider call
+    /// errored, or it returned an empty summary. Aborting beats
+    /// sending a request the context window cannot hold.
+    #[error("cannot compact context: {0}")]
+    Compact(#[from] crate::compact::CompactError),
 }
 
 impl RunError {
@@ -160,6 +186,11 @@ impl RunError {
             RunError::Transcript(err) => {
                 panic!("agent_loop::run records nothing, got transcript error: {err}")
             }
+            // A compaction provider failure maps straight back; an
+            // empty summary is the closest thing to "the provider gave
+            // us nothing usable".
+            RunError::Compact(crate::compact::CompactError::Provider(err)) => err,
+            RunError::Compact(crate::compact::CompactError::Empty) => ProviderError::NoChoices,
         }
     }
 }
@@ -248,15 +279,68 @@ where
         if usage.total_tokens > opts.max_tokens_budget {
             return Ok(LoopOutcome::BudgetExceeded { turns, usage });
         }
-        turns += 1;
 
-        let (request, bust) = prompt.assemble(CompletionRequest {
+        // Assemble the turn's canonical view first: the compaction
+        // decision (stage 6.2) runs on the estimate of exactly what
+        // would go out, before it goes out.
+        let (mut request, bust) = prompt.assemble(CompletionRequest {
             model: opts.model.clone(),
             messages: messages.clone(),
             tools: registry.specs(),
             max_tokens: opts.max_tokens,
             temperature: opts.temperature,
         });
+        // Stage 3.2: count the canonical prefix before it is sent —
+        // both the stage-6.2 compaction decision and (after it, if it
+        // re-assembled) this turn's reconcile use this number.
+        let mut estimated_input = tokens::estimate_input(&request);
+
+        // Stage 6.2: fold at/over the trigger — a pre-request decision
+        // on an estimate, never a reaction to a provider failure.
+        // One fold per turn: after it, `plan` sees only the kept tail
+        // and refuses (`None`), so a huge kept message can never spin
+        // the loop — the request goes out and the provider's own
+        // error (if any) is honest.
+        if let Some(knobs) = opts.compact
+            && crate::compact::due(estimated_input, knobs)
+            && let Some(plan) = crate::compact::plan(&messages, knobs.keep)
+        {
+            let (summary, summary_usage) = crate::compact::summarize(
+                provider,
+                &opts.model,
+                &messages[plan.start..plan.boundary],
+            )
+            .await?;
+            // The summarizer is real usage too — charge it to the
+            // run's budget (not recorded as a conversational turn;
+            // there is none).
+            usage = usage.plus(&summary_usage);
+            recorder(Recorded::Compact {
+                summary: summary.clone(),
+                folded: plan.folded,
+                keep: knobs.keep,
+            })?;
+            observer(LoopEvent::Compact {
+                folded: plan.folded,
+                kept: knobs.keep,
+            });
+            messages = crate::compact::apply(messages, plan, &summary);
+            // The fold never touches system text or tool schemas, so
+            // re-assembly cannot bust the prefix.
+            let (reassembled, bust_after) = prompt.assemble(CompletionRequest {
+                model: opts.model.clone(),
+                messages: messages.clone(),
+                tools: registry.specs(),
+                max_tokens: opts.max_tokens,
+                temperature: opts.temperature,
+            });
+            debug_assert!(
+                bust_after.is_none(),
+                "compaction must not change the cacheable prefix"
+            );
+            request = reassembled;
+            estimated_input = tokens::estimate_input(&request);
+        }
         if let Some(CacheBust {
             system_changed,
             tools_changed,
@@ -267,9 +351,8 @@ where
                 tools_changed,
             });
         }
-        // Stage 3.2: count the canonical prefix before it is sent, to
-        // reconcile against the provider's actual input tokens.
-        let estimated_input = tokens::estimate_input(&request);
+        turns += 1;
+
         // Stage 3.3: time the request → first token → stream end.
         let request_sent = Instant::now();
         let mut stream = provider.complete_stream(request).await?;
@@ -395,8 +478,9 @@ where
 }
 
 /// The text blocks of an assistant message, concatenated — they are
-/// fragments of one answer, not separate messages.
-fn plain_text(message: &Message) -> String {
+/// fragments of one answer, not separate messages. `pub(crate)` for
+/// the stage-6.2 summarizer, which reads the same shape.
+pub(crate) fn plain_text(message: &Message) -> String {
     message
         .content
         .iter()

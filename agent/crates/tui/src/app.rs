@@ -364,6 +364,9 @@ impl App {
                 };
                 self.status = format!("cache-bust: {what} changed");
             }
+            AppEvent::Compacted { folded, kept } => {
+                self.status = format!("compacted {folded} messages (kept the last {kept})");
+            }
             AppEvent::Metrics(metrics) => {
                 // Session-scope cost accumulates over reported turn
                 // costs — an unreported cost adds nothing (4.4).

@@ -27,6 +27,7 @@ const KNOWN_TYPES: &[&str] = &[
     "usage",
     "session_end",
     "turn_metrics",
+    "compact",
 ];
 
 /// Why a run stopped (mirrors the loop's `LoopOutcome`).
@@ -92,6 +93,16 @@ pub enum Event {
     /// turn's `usage` event. Never rehydrated into the conversation;
     /// purely an accounting record.
     TurnMetrics(TurnMetrics),
+    /// A compaction the loop applied before a request (stage 6.2): the
+    /// pinned summary plus the fold it describes — `folded` raw
+    /// messages replaced, `keep` non-system ones left raw. Resume
+    /// re-applies the fold; the raw messages stay in the transcript
+    /// (append-only history) and are simply not part of the view.
+    Compact {
+        summary: String,
+        folded: usize,
+        keep: usize,
+    },
 }
 
 /// A transcript line could not be encoded or decoded.
@@ -604,6 +615,11 @@ mod tests {
                 cache_hit_pct: None,
                 cost_usd: None,
             }),
+            Event::Compact {
+                summary: "condensed".into(),
+                folded: 9,
+                keep: 8,
+            },
         ];
         for event in &events {
             let line = Envelope::new(event.clone()).to_line().unwrap();

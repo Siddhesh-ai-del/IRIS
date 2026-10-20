@@ -105,6 +105,27 @@ Accounting only — readers rehydrating a conversation ignore it (like `usage`).
 {"v":0,"type":"turn_metrics","turn":1,"ttft_ms":184,"tokens_per_sec":62.5,"cache_hit_pct":32.99,"cost_usd":0.0042}
 ```
 
+### `compact`
+
+Context compaction (stage 6.2), written **before** the request it changes: the
+loop's pre-request estimate had reached ≥70% of the context window, so the
+older conversation was folded into `summary`. The raw `message` lines stay in
+the transcript (append-only history) — rehydration keeps system messages,
+pins the summary in their place, and keeps only the last `keep` non-system
+messages. The fold never moves system text (the cacheable prefix) and never
+splits a `tool_use`/`tool_result` pair, so a resumed session rebuilds
+byte-identically what the loop actually sent.
+
+| Field | Type | Notes |
+|---|---|---|
+| `summary` | string | The pinned continuation brief — passed through the stage-5.1 redaction chokepoint like any message text. |
+| `folded` | integer | How many raw messages the fold removed from the conversation view. |
+| `keep` | integer | Non-system messages kept raw after the fold — the keep window rehydration applies. |
+
+```json
+{"v":0,"type":"compact","summary":"Task: fix the flaky gate test. Edited crates/core/tests/gate.rs; failure now reproduces only under load. Next: bisect the timing change.","folded":42,"keep":8}
+```
+
 ### `session_end`
 
 Marks a **cleanly finished run**. A resumed session's transcript may contain an

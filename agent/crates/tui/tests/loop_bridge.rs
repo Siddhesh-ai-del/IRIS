@@ -68,6 +68,7 @@ fn options() -> LoopOptions {
         max_tokens: None,
         temperature: None,
         price: None,
+        compact: None,
     }
 }
 
