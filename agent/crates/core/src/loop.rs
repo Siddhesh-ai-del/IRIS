@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::assembly::{Assembler, CacheBust};
 use crate::config::Config;
@@ -50,6 +50,10 @@ pub struct LoopOptions {
     /// Stage 6.2 compaction knobs — `None` disables folding entirely
     /// (config `context_window = 0`, or a test that must not compact).
     pub compact: Option<crate::compact::CompactOpts>,
+    /// Stage 6.4 user hooks — shell commands fired at the loop's
+    /// lifecycle points. Empty by default: nothing fires, nothing
+    /// spawns. Failures surface as [`LoopEvent::HookWarning`] only.
+    pub hooks: crate::config::Hooks,
 }
 
 impl LoopOptions {
@@ -69,6 +73,7 @@ impl LoopOptions {
                 window: config.context_window,
                 keep: config.compact_keep,
             }),
+            hooks: config.hooks.clone(),
         }
     }
 }
@@ -104,6 +109,11 @@ pub enum LoopEvent<'a> {
     /// This turn's metrics, right after they were recorded (stage 3.3)
     /// — what the stage-3.4 gauge and the TUI status line render.
     Metrics(TurnMetrics),
+    /// A configured hook command failed, timed out, or could not start
+    /// (stage 6.4). Advisory only: the run continues unaffected, and
+    /// this is how the headless runner's stderr and the TUI's status
+    /// line hear about it (core itself never prints).
+    HookWarning(String),
 }
 
 /// How a run ended.
@@ -324,6 +334,26 @@ where
                 folded: plan.folded,
                 kept: knobs.keep,
             });
+            // Stage 6.4: `on_compact` reports the fold just performed,
+            // for the turn about to start (`turns + 1`). Before
+            // `apply` consumes `plan`.
+            for warning in crate::hooks::fire(
+                &opts.hooks,
+                crate::hooks::Hook::Compact,
+                &ctx.workspace_root,
+                &json!({
+                    "turn": turns + 1,
+                    "model": opts.model.as_str(),
+                    "workspace_root": &ctx.workspace_root,
+                    "folded": plan.folded,
+                    "keep": knobs.keep,
+                    "summary": crate::hooks::preview(&summary),
+                }),
+            )
+            .await
+            {
+                observer(LoopEvent::HookWarning(warning));
+            }
             messages = crate::compact::apply(messages, plan, &summary);
             // The fold never touches system text or tool schemas, so
             // re-assembly cannot bust the prefix.
@@ -414,6 +444,32 @@ where
         recorder(Recorded::Metrics(metrics.clone()))?;
         observer(LoopEvent::Metrics(metrics));
 
+        // Stage 6.4: `on_turn_end` — every completed turn, the final
+        // one included (it fires before the loop returns below).
+        for warning in crate::hooks::fire(
+            &opts.hooks,
+            crate::hooks::Hook::TurnEnd,
+            &ctx.workspace_root,
+            &json!({
+                "turn": turns,
+                "model": opts.model.as_str(),
+                "workspace_root": &ctx.workspace_root,
+                "stop_reason": &response.stop_reason,
+                "text": crate::hooks::preview(&text),
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                    "cached_input_tokens": response.usage.cached_input_tokens,
+                    "cost_usd": response.usage.cost_usd,
+                },
+            }),
+        )
+        .await
+        {
+            observer(LoopEvent::HookWarning(warning));
+        }
+
         if calls.is_empty() {
             return Ok(LoopOutcome::Completed { text, turns, usage });
         }
@@ -423,6 +479,28 @@ where
                 id: &call.id,
                 name: &call.name,
             });
+            // Stage 6.4: `on_tool_pre` sees the model's request as
+            // asked — before the gate resolves it — redacted on the
+            // way out (the stage-5.1 chokepoint).
+            for warning in crate::hooks::fire(
+                &opts.hooks,
+                crate::hooks::Hook::ToolPre,
+                &ctx.workspace_root,
+                &json!({
+                    "turn": turns,
+                    "model": opts.model.as_str(),
+                    "workspace_root": &ctx.workspace_root,
+                    "tool": {
+                        "name": call.name.as_str(),
+                        "id": call.id.as_str(),
+                        "input": &call.input,
+                    },
+                }),
+            )
+            .await
+            {
+                observer(LoopEvent::HookWarning(warning));
+            }
             let detail = call.input.to_string();
             // The config gate decides allow/deny here; an ask goes to
             // the resolver (TUI prompt at stages 4.5/4.6) and fails
@@ -467,6 +545,28 @@ where
                 name: &call.name,
                 result: &result,
             });
+            // Stage 6.4: `on_tool_post` — the outcome the model will
+            // see (`is_error` covers denials, failures, and errors).
+            for warning in crate::hooks::fire(
+                &opts.hooks,
+                crate::hooks::Hook::ToolPost,
+                &ctx.workspace_root,
+                &json!({
+                    "turn": turns,
+                    "model": opts.model.as_str(),
+                    "workspace_root": &ctx.workspace_root,
+                    "tool": {
+                        "name": call.name.as_str(),
+                        "id": call.id.as_str(),
+                        "is_error": result.is_error,
+                        "content": crate::hooks::preview(&result.content),
+                    },
+                }),
+            )
+            .await
+            {
+                observer(LoopEvent::HookWarning(warning));
+            }
             let tool_message = Message {
                 role: Role::Tool,
                 content: vec![ContentBlock::ToolResult(result)],

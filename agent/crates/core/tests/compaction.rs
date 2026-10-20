@@ -153,6 +153,7 @@ fn opts(window: u64, keep: usize) -> LoopOptions {
         temperature: None,
         price: None,
         compact: Some(CompactOpts { window, keep }),
+        hooks: iris_core::config::Hooks::default(),
     }
 }
 

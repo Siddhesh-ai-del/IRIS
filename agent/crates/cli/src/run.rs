@@ -250,6 +250,11 @@ pub(crate) fn execute(
             LoopEvent::Metrics(metrics) => {
                 eprintln!("{}", gauge::format_turn(&metrics));
             }
+            // Stage 6.4: a failed/timed-out hook never stops the run —
+            // advisory line on stderr (stdout stays the model's).
+            LoopEvent::HookWarning(warning) => {
+                eprintln!("[iris] hook: {warning}");
+            }
         },
         |recorded| {
             let appended = match recorded {

@@ -35,8 +35,8 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 6.4 (hooks/events — `on_tool_pre`, `on_tool_post`, `on_turn_end`, `on_compact`)
-- **Current phase:** 6 — Parity Features (next: 6.4; 6.1–6.3 complete; Phase 5 complete: 5.1–5.3)
+- **Next action:** Stage 6.5 (custom commands/skills — `.iris/commands/*.md` frontmatter → prompt templates; `/help` lists them)
+- **Current phase:** 6 — Parity Features (next: 6.5; 6.1–6.4 complete; Phase 5 complete: 5.1–5.3)
 - **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20)
 
 ### Environment notes (observed 2026-09-30)
@@ -706,8 +706,25 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   the fixture file's exact contents came back, 2 turns / 7,408 tokens / $0.00, key
   never touched disk or transcript.
 
-- [ ] **6.4 Hooks/events** (1h) — `on_tool_pre`, `on_tool_post`, `on_turn_end`, `on_compact`:
+- [x] **6.4 Hooks/events** (1h) — `on_tool_pre`, `on_tool_post`, `on_turn_end`, `on_compact`:
   shell commands with timeout + JSON payload. Risk: Low · Depends: 1.9
+  **Done:** `[hooks]` file-layer table — each event takes a command string *or* list
+  (`string_or_vec`); unknown event names are a **config error** (a typo can't silently
+  do nothing); `timeout_secs` defaults to 15 (`0` clamps to 1s — no "wait forever").
+  `iris_core::hooks::fire` stamps `event` into the payload, redacts the whole object at
+  the stage-5.1 chokepoint, delivers it **newline-terminated on stdin** (cwd = workspace
+  root; stdout/stderr discarded), and enforces one shared deadline across delivery +
+  wait — the write end is *closed* after the payload (EOF, not flush), so reading hooks
+  finish immediately; hangs are SIGKILLed. Failures are **advisory**: non-zero exit,
+  timeout, or spawn error → `LoopEvent::HookWarning` (core still never prints) →
+  headless `[iris] hook: …` on stderr, TUI status line. No deny-via-hook — the gate
+  stays the one enforcement point (1.7); hooks observe. Payload shapes: `tool_pre` =
+  the request as asked (pre-gate), `tool_post` = the outcome (`is_error` covers
+  denials) with a 4 KiB content preview, `turn_end` = stop_reason + usage + text
+  preview every turn (final included), `compact` = fold + pinned summary for the turn
+  about to start. Wired at the loop's four sites; `LoopOptions.hooks` flows from
+  `from_config`, so `run`/`resume`/`chat` all share it. 10 new tests → **413/413
+  green**, clippy/fmt/secret-scan clean.
 
 - [ ] **6.5 Custom commands/skills** (1h) — markdown files in `.iris/commands/*.md` with
   frontmatter args → prompt templates; `/help` lists them. Risk: Low · Depends: 4.2

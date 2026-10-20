@@ -229,6 +229,7 @@ fn options(max_turns: u32, max_tokens_budget: u64) -> LoopOptions {
         temperature: None,
         price: None,
         compact: None,
+        hooks: iris_core::config::Hooks::default(),
     }
 }
 
@@ -627,6 +628,9 @@ async fn observer_sees_streamed_text_and_tool_lifecycle() {
             // Stage 6.2 — never fires here (`compact: None` in these
             // runs); its own suite asserts the real line.
             LoopEvent::Compact { .. } => "compact".to_string(),
+            // Stage 6.4 — never fires here (default hooks); the hooks
+            // suite pins its own warnings.
+            LoopEvent::HookWarning(_) => return,
         };
         sink.lock().unwrap().push(line);
     };

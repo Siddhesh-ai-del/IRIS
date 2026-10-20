@@ -69,6 +69,7 @@ fn options() -> LoopOptions {
         temperature: None,
         price: None,
         compact: None,
+        hooks: iris_core::config::Hooks::default(),
     }
 }
 

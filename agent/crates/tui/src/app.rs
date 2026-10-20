@@ -427,6 +427,11 @@ impl App {
                 self.answer = None;
                 self.answer_in_flight = false;
             }
+            // Stage 6.4: hooks are advisory — the status line reports
+            // the failure and the run keeps streaming.
+            AppEvent::HookWarning(message) => {
+                self.status = format!("hook: {message}");
+            }
         }
     }
 

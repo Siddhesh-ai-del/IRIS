@@ -53,6 +53,9 @@ pub enum AppEvent {
     RunEnded { summary: String, usage: Usage },
     /// The run died (provider or transcript failure).
     Error { message: String },
+    /// A configured hook command failed or timed out (stage 6.4) —
+    /// advisory; the run continues. Rendered in the status line.
+    HookWarning(String),
 }
 
 impl From<LoopEvent<'_>> for AppEvent {
@@ -78,6 +81,7 @@ impl From<LoopEvent<'_>> for AppEvent {
             },
             LoopEvent::Metrics(metrics) => AppEvent::Metrics(metrics),
             LoopEvent::Compact { folded, kept } => AppEvent::Compacted { folded, kept },
+            LoopEvent::HookWarning(warning) => AppEvent::HookWarning(warning.to_string()),
         }
     }
 }

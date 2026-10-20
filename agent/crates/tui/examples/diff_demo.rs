@@ -188,6 +188,7 @@ fn main() -> Result<(), String> {
             temperature: None,
             price: None,
             compact: None,
+            hooks: iris_core::config::Hooks::default(),
         },
         writer,
         system: Message::text(Role::System, "You are IRIS in demo mode."),

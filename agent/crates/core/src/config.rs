@@ -57,6 +57,11 @@ pub const DEFAULT_MCP_MAX_TOOLS: usize = 32;
 /// fixed truncation marker), so a huge dump can't silently eat context.
 pub const DEFAULT_MCP_MAX_RESULT_BYTES: usize = 32 * 1024;
 
+/// Default total seconds one hook command may run before it is killed
+/// (stage 6.4) — a hook hangs on the agent's critical path, so it gets
+/// a hard deadline, not patience.
+pub const DEFAULT_HOOK_TIMEOUT_SECS: u64 = 15;
+
 /// Layered configuration values (no secrets, by design).
 ///
 /// Not `Eq`: the stage-3.3 price table carries `f64` rates.
@@ -97,6 +102,15 @@ pub struct Config {
     /// `OPENROUTER_API_KEY` is ever read from the environment.
     #[serde(default)]
     pub mcp: McpConfig,
+    /// Loop-lifecycle hooks (stage 6.4): shell commands fired at
+    /// `on_tool_pre`, `on_tool_post`, `on_turn_end`, and `on_compact`
+    /// with a redacted JSON payload on stdin. **File-layer only**
+    /// (a table of commands, like `permissions`) and trusted exactly
+    /// like `[mcp]` spawn commands: user-authored code in the user's
+    /// own config file, run with the workspace root as cwd — no new
+    /// secret surface (D6 untouched).
+    #[serde(default)]
+    pub hooks: Hooks,
 }
 
 /// USD price list for one model (stage 3.3) — per million tokens,
@@ -160,6 +174,67 @@ impl McpServerConfig {
     }
 }
 
+/// User hooks (stage 6.4): the `[hooks]` table — shell commands fired
+/// at the agent loop's four lifecycle points. Every command runs under
+/// `sh -c` with the workspace root as its cwd, receives the event's
+/// JSON payload (redacted through the stage-5.1 chokepoint) on stdin,
+/// and is killed after `timeout_secs`; stdout and stderr are discarded.
+/// Failures are advisories ([`LoopEvent::HookWarning`](crate::agent_loop::LoopEvent)),
+/// never run errors. Unknown event names are a config error — a typo
+/// must not silently do nothing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    /// Before every tool dispatch — the model's request as asked,
+    /// before the permission gate resolves it.
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub on_tool_pre: Vec<String>,
+    /// After every dispatch — the outcome the model will see
+    /// (`is_error` covers denials, failures, and errors alike).
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub on_tool_post: Vec<String>,
+    /// After every completed turn, the final one included.
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub on_turn_end: Vec<String>,
+    /// After a compaction folds the history, before the next request.
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub on_compact: Vec<String>,
+    /// Total seconds one command may run before it is killed.
+    /// `0` clamps to one second — there is no "wait forever".
+    #[serde(default = "default_hook_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for Hooks {
+    fn default() -> Self {
+        Self {
+            on_tool_pre: Vec::new(),
+            on_tool_post: Vec::new(),
+            on_turn_end: Vec::new(),
+            on_compact: Vec::new(),
+            timeout_secs: DEFAULT_HOOK_TIMEOUT_SECS,
+        }
+    }
+}
+
+/// One command string or a list of them — `on_tool_pre = "cmd"` and
+/// `on_tool_pre = ["a", "b"]` both work.
+fn string_or_vec<'de, D>(de: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(de)? {
+        OneOrMany::One(one) => vec![one],
+        OneOrMany::Many(many) => many,
+    })
+}
+
 fn default_base_url() -> String {
     DEFAULT_PROVIDER_BASE_URL.to_string()
 }
@@ -187,6 +262,10 @@ fn default_mcp_max_result_bytes() -> usize {
     DEFAULT_MCP_MAX_RESULT_BYTES
 }
 
+fn default_hook_timeout_secs() -> u64 {
+    DEFAULT_HOOK_TIMEOUT_SECS
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -198,6 +277,7 @@ impl Default for Config {
             permissions: BTreeMap::new(),
             pricing: BTreeMap::new(),
             mcp: McpConfig::default(),
+            hooks: Hooks::default(),
         }
     }
 }
@@ -351,6 +431,9 @@ pub fn load_config(inputs: &ConfigInputs<'_>) -> Result<Config, ConfigError> {
         }
         if table.contains_key("mcp") {
             config.mcp = file.mcp;
+        }
+        if table.contains_key("hooks") {
+            config.hooks = file.hooks;
         }
     }
 
@@ -843,5 +926,47 @@ mod tests {
     fn no_mcp_table_leaves_servers_empty() {
         let cfg = load(Some("max_turns = 7"), &map(&[]), None);
         assert!(cfg.mcp.servers.is_empty());
+    }
+
+    // --- hooks (stage 6.4) ------------------------------------------------
+
+    #[test]
+    fn file_layer_loads_hooks_accepting_string_or_array_commands() {
+        let cfg = load(
+            Some(
+                "[hooks]\n\
+                 on_tool_pre = \"say pre\"\n\
+                 on_turn_end = [\"a.sh\", \"b.sh\"]\n\
+                 timeout_secs = 3\n",
+            ),
+            &map(&[]),
+            None,
+        );
+        assert_eq!(cfg.hooks.on_tool_pre, vec!["say pre"]);
+        assert_eq!(cfg.hooks.on_tool_post, Vec::<String>::new());
+        assert_eq!(cfg.hooks.on_turn_end, vec!["a.sh", "b.sh"]);
+        assert_eq!(cfg.hooks.on_compact, Vec::<String>::new());
+        assert_eq!(cfg.hooks.timeout_secs, 3);
+    }
+
+    #[test]
+    fn no_hooks_table_leaves_hooks_empty_with_the_default_timeout() {
+        let cfg = load(Some("max_turns = 7"), &map(&[]), None);
+        assert_eq!(cfg.hooks, Hooks::default());
+        assert!(cfg.hooks.on_tool_pre.is_empty());
+        assert_eq!(cfg.hooks.timeout_secs, DEFAULT_HOOK_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn an_unknown_hook_event_is_a_config_error() {
+        // A typo (`on_tool_prre`) must fail loudly, not silently do
+        // nothing — hooks are a trust surface, not a scratch pad.
+        let err = load_config(&ConfigInputs {
+            file_toml: Some("[hooks]\non_tool_prre = \"x\"\n"),
+            env: &map(&[]),
+            flag_base_url: None,
+        })
+        .expect_err("unknown hook names must not parse");
+        assert!(err.to_string().contains("on_tool_prre"), "{err}");
     }
 }

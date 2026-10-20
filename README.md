@@ -81,7 +81,11 @@ released software.
   budget (`max_tools`, `max_result_bytes`) so a generous server can't silently eat
   the context window; a broken server warns and is skipped, never blocks the run
   (stage 6.3).
-- 📋 **Hooks and custom commands** — project-local automation without forking the agent.
+- ✅ **Hooks** — `[hooks]` shell commands fired at `on_tool_pre`, `on_tool_post`,
+  `on_turn_end`, and `on_compact` with a redacted JSON payload on stdin, a hard
+  per-command timeout, and advisory-only failures — a broken, hanging, or missing
+  hook warns and is killed, it never stops the run (stage 6.4).
+- 📋 **Custom commands** — project-local prompt templates without forking the agent.
 
 ## Project status
 
@@ -103,8 +107,8 @@ none behind, the dependency graph may not grow a second HTTP client or a
 telemetry SDK, and `iris doctor` spells out exactly what leaves the machine.
 The whole privacy stack has been validated live against the real OpenRouter
 API with a free model — real streaming, a real tool call, $0.00 cost. Next
-up: Phase 6 (6.4: hooks next). Everything is built under
-test-driven development (403 tests). There are no versioned releases yet.
+up: Phase 6 (6.5: custom commands next). Everything is built under
+test-driven development (413 tests). There are no versioned releases yet.
 
 ### Roadmap
 
@@ -118,7 +122,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 3 | Cache-first sessions (prefix-invariant assembly, token accounting, live metrics) | ✅ Complete |
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
-| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.4) |
+| 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | 🔵 In progress (6.5) |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | Planned |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
