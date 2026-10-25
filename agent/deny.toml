@@ -1,0 +1,48 @@
+# cargo-deny policy (stage 7.4) — audits the dependency graph on four
+# axes: RustSec advisories, license allowlist, duplicate/wildcard
+# versions, and registry sources. Run with `cargo deny check`; wired
+# into `just ci` and GitHub Actions so a bad update turns CI red.
+
+[graph]
+all-features = true
+
+[advisories]
+# A RustSec advisory is a hard failure: CI goes red until the lockfile
+# is updated or the advisory is explicitly waived here with a dated
+# reason. (Template ignore list left empty on purpose.)
+ignore = []
+
+[licenses]
+# Permissive only — every entry is compatible with the workspace's own
+# "MIT OR Apache-2.0" dual license. Anything else must be added here
+# deliberately, not silently accepted.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    # webpki-root-certs (TLS trust store) — permissive data license
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicates are a supply-chain smell (two versions of one crate) but
+# common during semver transitions — warn, don't fail. Wildcard
+# version requirements are never acceptable in a locked workspace.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Everything must come from crates.io over the official registry —
+# no git pins, no alternative registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

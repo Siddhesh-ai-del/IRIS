@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 7.4 (Security + release hardening — `ecc:security-audit`, dependency audit, release profile, single-binary smoke test, README onboarding)
-- **Current phase:** 7 — Quality Gate (next: 7.4; 7.3 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25)
+- **Next action:** all planned stages complete (0.1 → 7.4 ✅) — awaiting 7.4 sign-off; next work is post-v1 (see **Deferred** backlog)
+- **Current phase:** 7 — Quality Gate (7.4 done; all stages complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -804,9 +804,25 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   `justfile` `ci` recipe switched to check-mode format (`fmt-check` added — CI never mutates).
   clippy/fmt/secret-scan clean.
 
-- [ ] **7.4 Security + release hardening** (1h) — `ecc:security-audit`, dependency audit
+- [x] **7.4 Security + release hardening** (1h) — `ecc:security-audit`, dependency audit
   (`cargo vet`/`cargo deny`), strip + `opt-level` release, single-binary smoke test, `README` with
   3-step onboarding. Risk: Low · Depends: all
+  Done 2026-10-25: **audit** — `ecc:security-audit` clean; `cargo deny` (chosen over cargo-vet)
+  with a focused `agent/deny.toml`: advisories hard-deny with an empty waiver list, permissive-only
+  license allowlist, `wildcards = deny`, crates.io-only sources; duplicate versions stay `warn`
+  (semver-transition noise is expected). RED on first run: 7 RustSec vulns (4×rustls, rustls-webpki,
+  tokio, webpki-root-certs) + empty license allowlist + 3 bare path deps read as wildcards → GREEN:
+  targeted `cargo update -p` (rustls 0.23.46, rustls-webpki 0.103.16, tokio 1.54.1,
+  webpki-root-certs 1.0.11), the update's own `CDLA-Permissive-2.0` allow-listed with a comment,
+  workspace path deps pinned `version = "0.1.0"` (also required for future publishing). **Release
+  profile**: explicit `opt-level = 3` + `debug = false` alongside the existing thin LTO /
+  codegen-units 1 / strip. **Smoke**: `agent/scripts/smoke.sh` (one source of truth for `just smoke`
+  and CI) builds release, copies the binary **alone** into a temp dir, runs it under `env -i` with a
+  fresh HOME, no config and no key — version/help/doctor all pass: single standalone binary, 16.2 MB
+  stripped. **README**: installation rewritten as explicit 3-step onboarding (build → key → run).
+  CI gained a `cargo deny check` step and a parallel `smoke` job. Gates: `just ci`
+  (fmt + clippy + tests + audit) exit 0, `cargo test` fallback exit 0, smoke green, YAML valid,
+  secret-scan clean. **All planned stages complete.**
 
 ## Deferred (post-v1 backlog)
 

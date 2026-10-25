@@ -1,9 +1,11 @@
 name: ci
 
-# Headless quality gate (stage 7.3): format, lint, and the full
-# hermetic test suite — httpmock providers only, no network egress and
-# no secrets, so the E2E scenario (`crates/cli/tests/scenario.rs`)
-# runs exactly as it does locally. Mirrors `just ci` in `agent/`.
+# Headless quality gate (stages 7.3/7.4): format, lint, dependency
+# audit, the full hermetic test suite — httpmock providers only, no
+# network egress and no secrets, so the E2E scenario
+# (`crates/cli/tests/scenario.rs`) runs exactly as it does locally —
+# plus a release-build smoke test proving the shipped binary stands
+# alone. Mirrors `just ci` / `just smoke` in `agent/`.
 
 on:
   push:
@@ -25,5 +27,27 @@ jobs:
       - name: Clippy (-D warnings)
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
+      - name: Cache cargo-deny binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-${{ runner.os }}
+
+      - name: Dependency audit (cargo-deny)
+        run: |
+          cargo deny --version 2>/dev/null || cargo install cargo-deny --locked
+          cargo deny check
+
       - name: Test (hermetic — no network, no keys)
         run: cargo test --workspace --all-features
+
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Single-binary smoke test (release build, clean env)
+        run: bash scripts/smoke.sh

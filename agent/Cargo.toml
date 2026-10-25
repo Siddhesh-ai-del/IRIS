@@ -14,7 +14,14 @@ all = { level = "warn" }
 [profile.dev]
 debug = 1
 
+# Release hardening (stage 7.4): one small, fast, self-contained binary.
+# - opt-level 3 / codegen-units 1 / thin LTO: full optimization
+# - strip: no symbol table in the shipped file (backtraces still render
+#   via the symbol names rustc embeds in panic messages)
+# - debug = false: no debug info baked in
 [profile.release]
+opt-level = 3
+debug = false
 lto = "thin"
 codegen-units = 1
 strip = true

@@ -113,12 +113,13 @@ configured provider and leaves none behind, the dependency graph may not grow a
 second HTTP client or a telemetry SDK, and `iris doctor` spells out exactly what
 leaves the machine. The whole privacy stack has been validated live against the
 real OpenRouter API with a free model — real streaming, a real tool call, $0.00
-cost. Next up: Phase 7 (7.4: release hardening next). Everything is built under
-test-driven development (455 tests, `iris-core` at 95% line coverage), with recorded
-HTTP cassettes replaying real OpenRouter streaming and tool-loop conversations
-hermetically — every push runs that gate headlessly through GitHub Actions
-(`just ci`: format check, clippy, full suite). There are no
-versioned releases yet.
+cost. **All seven phases of the implementation plan are now complete.**
+Everything is built under test-driven development (455 tests, `iris-core` at
+95% line coverage), with recorded HTTP cassettes replaying real OpenRouter
+streaming and tool-loop conversations hermetically — every push runs that gate
+headlessly through GitHub Actions: format check, clippy, the full suite, a
+`cargo deny` dependency audit, and a release-build smoke test that runs the
+binary standalone. There are no versioned releases yet.
 
 ### Roadmap
 
@@ -133,7 +134,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | ✅ Complete |
-| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | 🔵 In progress (7.4) |
+| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | ✅ Complete |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
 and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
@@ -144,8 +145,10 @@ support, worktree replay A/B, local (GGUF) inference mode.
 **No releases yet** — IRIS has no published binaries. When a first release ships,
 install instructions will appear here and on the [releases page](../../releases).
 
-To use it today, build from source (Rust toolchain is pinned in
+Getting started takes three steps (Rust toolchain is pinned in
 [`agent/rust-toolchain.toml`](agent/rust-toolchain.toml)):
+
+**Step 1 — build the binary:**
 
 ```bash
 git clone https://github.com/Siddhesh-ai-del/IRIS
@@ -153,14 +156,24 @@ cd IRIS/agent
 cargo build --release
 ```
 
-Then export your OpenRouter key and try it:
+**Step 2 — set your key** (environment only — IRIS never reads keys from
+config files):
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-…   # never read from a config file
-./target/release/iris doctor
-./target/release/iris run -p "list the files here and summarize what this project is"
-./target/release/iris chat              # the interactive shell (Phase 4)
+export OPENROUTER_API_KEY=sk-or-v1-…
+./target/release/iris doctor   # confirms key presence, egress, telemetry-off
 ```
+
+**Step 3 — run it:**
+
+```bash
+./target/release/iris run -p "list the files here and summarize what this project is"
+./target/release/iris chat     # the interactive shell (Phase 4)
+```
+
+The release build is a single self-contained binary — no sidecar files,
+no runtime dependencies (`just smoke` verifies it runs standalone with a
+clean environment).
 
 `iris run -p` streams model text to stdout, tool events to stderr, and exits with
 the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).
@@ -223,6 +236,11 @@ Please do not report security vulnerabilities through public issues. Follow the
 process in [SECURITY.md](SECURITY.md). For anything involving credentials or
 provider keys: IRIS will only ever read API keys from environment variables or
 the system keyring — never from a config file, and never into a transcript.
+
+The dependency graph is audited on every build: `cargo deny check` (RustSec
+advisories with an empty waiver list, a permissive-only license allowlist,
+wildcard-dependency and registry-source bans) runs in `just ci` and in every
+GitHub Actions run.
 
 ## Support
 

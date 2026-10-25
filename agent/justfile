@@ -32,5 +32,18 @@ test:
 cov:
     cargo llvm-cov --workspace --all-features --html
 
+# Single-binary smoke test (stage 7.4): the stripped release binary,
+# copied ALONE into a temp dir, must run with a completely clean
+# environment — no sidecar files, no ambient IRIS_* overrides, no key,
+# no network. Proves the shipped artifact is self-contained. Shared
+# with the GitHub Actions `smoke` job via scripts/smoke.sh.
+smoke:
+    bash scripts/smoke.sh
+
+# Dependency audit (stage 7.4): RustSec advisories, license allowlist,
+# wildcard bans, sources — requires cargo-deny (cargo install cargo-deny)
+audit:
+    cargo deny check
+
 # Run everything CI runs (check mode — CI never mutates the tree)
-ci: fmt-check lint test
+ci: fmt-check lint test audit
