@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 7.1 (HTTP cassette layer — record/replay on httpmock covering streaming + tool loops)
-- **Current phase:** 7 — Quality Gate (next: 7.1; Phase 6 complete: 6.1–6.5)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete)
+- **Next action:** Stage 7.2 (coverage ≥80% on `iris-core` — `cargo llvm-cov`, fill gaps: permission policy matrix, assembly edge cases, redaction)
+- **Current phase:** 7 — Quality Gate (next: 7.2; 7.1 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -749,8 +749,25 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
 
 ### Phase 7 — Quality Gate (4 stages, ~4h)
 
-- [ ] **7.1 HTTP cassette layer** (1h) — record/replay on `httpmock` covering streaming + tool loops
+- [x] **7.1 HTTP cassette layer** (1h) — record/replay on `httpmock` covering streaming + tool loops
   for the OpenRouter (OpenAI-compatible) client; no live API needed in CI. Risk: Low · Depends: 1.3
+  **Done (2026-10-25):** `OpenAiClient::with_recorder` — a record seam that captures
+  request body + status + content-type + **raw response bytes** (a tee under the SSE
+  parser), **never headers**, so an API key can't reach a committed file; a streamed
+  exchange fires exactly once (terminal `Done` seen or stream drained) — a cancelled
+  run records nothing. Test-side layer (`crates/core/tests/cassettes.rs`): JSON
+  cassettes `{name, model, exchanges}` under `tests/cassettes/`, replayed on httpmock
+  with **exact request-body matching** — any divergence 404s the run, so a wrong turn
+  can never be served. One shared `run_scenario` drives record *and* replay
+  byte-identically (same system/user text, fixture workspace, config, registry; model
+  slug read from the cassette); record asserts no workspace path or key ever enters a
+  request body. Two `#[ignore]`d record tests ran **live** against OpenRouter (env-only
+  key, `nvidia/nemotron-3.5-lightning:free`) → committed cassettes: `streaming.json`
+  (1 exchange — real SSE with id field, deltas, usage, `[DONE]`) and `tool_loop.json`
+  (2 exchanges — the model really called `read_file` and fed the content back; both
+  asserts enforced at record time). Replay tests pin the real model's verbatim answer,
+  per-turn exact serving, delta-streaming, and turn counts; key-free by design (no
+  network in CI). 7 new tests → **431/431 green**, clippy/fmt/secret-scan clean.
 
 - [ ] **7.2 Coverage to ≥80% on `iris-core`** (1h) — `cargo llvm-cov`; fill gaps (permission policy
   matrix, assembly edge cases, redaction). Risk: Low · Depends: all

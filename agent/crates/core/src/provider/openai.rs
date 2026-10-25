@@ -3,19 +3,47 @@
 //! Auth: `Authorization: Bearer $OPENROUTER_API_KEY` only (D6 — the key is
 //! passed in by the caller, never read from config files here).
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
+use serde::{Deserialize, Serialize};
 
 use super::wire::{self, WireRequest, WireResponse};
 use super::{
     CONNECT_TIMEOUT_SECS, CompletionRequest, CompletionResponse, DEFAULT_TIMEOUT_SECS, EventStream,
-    Provider, ProviderError,
+    Provider, ProviderError, StreamEvent,
 };
+
+/// One HTTP exchange captured verbatim for a cassette (stage 7.1) —
+/// the record half of the record/replay layer.
+///
+/// **Headers are deliberately never captured**: the API key travels in
+/// `Authorization`, so a recorded file can never contain one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CapturedExchange {
+    /// The exact JSON body that was POSTed.
+    pub request_body: String,
+    /// HTTP status code of the response.
+    pub status: u16,
+    /// The response `content-type` — replay must serve
+    /// `text/event-stream` for streams to parse.
+    pub content_type: String,
+    /// The response body as received — raw SSE for streams.
+    pub response_body: String,
+}
+
+/// Who to hand a finished exchange to ([`OpenAiClient::with_recorder`]).
+type Recorder = Arc<dyn Fn(CapturedExchange) + Send + Sync>;
 
 /// Non-streaming `POST {base_url}/chat/completions` client.
 pub struct OpenAiClient {
     base_url: String,
     api_key: String,
     http: reqwest::Client,
+    /// Cassette recorder (stage 7.1) — `None` in production.
+    recorder: Option<Recorder>,
 }
 
 impl OpenAiClient {
@@ -28,11 +56,58 @@ impl OpenAiClient {
                 .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
                 .build()
                 .expect("rustls-backed reqwest client cannot fail to build"),
+            recorder: None,
         }
+    }
+
+    /// Attach a cassette recorder (stage 7.1): every response the
+    /// client *fully reads* is handed over verbatim — a streamed
+    /// response only once its terminal event arrived or the stream was
+    /// drained, so a cancelled run records nothing. Test/record tooling
+    /// only; production builds carry `None` and behave identically.
+    pub fn with_recorder(
+        mut self,
+        recorder: impl Fn(CapturedExchange) + Send + Sync + 'static,
+    ) -> Self {
+        self.recorder = Some(Arc::new(recorder));
+        self
     }
 
     fn endpoint(&self) -> String {
         format!("{}/chat/completions", self.base_url)
+    }
+
+    /// The exact JSON about to go on the wire — computed only when
+    /// someone is recording; production serializes once, as before.
+    fn capture_request<T: serde::Serialize>(
+        &self,
+        body: &T,
+    ) -> Result<Option<String>, ProviderError> {
+        match &self.recorder {
+            Some(_) => Ok(Some(
+                serde_json::to_string(body)
+                    .map_err(|err| ProviderError::Decode(err.to_string()))?,
+            )),
+            None => Ok(None),
+        }
+    }
+
+    /// Hand a fully-read response to the recorder, if any.
+    fn record(
+        &self,
+        captured: Option<String>,
+        status: reqwest::StatusCode,
+        content_type: String,
+        response_body: String,
+    ) {
+        if let (Some(recorder), Some(request_body)) = (&self.recorder, captured) {
+            recorder(CapturedExchange {
+                request_body,
+                status: status.as_u16(),
+                content_type,
+                response_body,
+            });
+        }
     }
 
     fn map_http_error(status: reqwest::StatusCode, body: String) -> ProviderError {
@@ -67,6 +142,7 @@ impl Provider for OpenAiClient {
         request: CompletionRequest,
     ) -> Result<CompletionResponse, ProviderError> {
         let body: WireRequest = wire::request_to_wire(request);
+        let captured = self.capture_request(&body)?;
         let response = self
             .http
             .post(self.endpoint())
@@ -77,7 +153,11 @@ impl Provider for OpenAiClient {
             .await?;
 
         let status = response.status();
+        let content_type = content_type_of(&response);
         let text = response.text().await?;
+        // Recorded whatever the status — an error exchange is a
+        // fully-read response like any other.
+        self.record(captured, status, content_type, text.clone());
         if !status.is_success() {
             return Err(Self::map_http_error(status, text));
         }
@@ -91,6 +171,7 @@ impl Provider for OpenAiClient {
         request: CompletionRequest,
     ) -> Result<EventStream, ProviderError> {
         let body = wire::request_to_streaming_wire(request);
+        let captured = self.capture_request(&body)?;
         let response = self
             .http
             .post(self.endpoint())
@@ -103,10 +184,125 @@ impl Provider for OpenAiClient {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(Self::map_http_error(status, response.text().await?));
+            let content_type = content_type_of(&response);
+            let text = response.text().await?;
+            self.record(captured, status, content_type, text.clone());
+            return Err(Self::map_http_error(status, text));
         }
-        Ok(super::stream::event_stream(response.bytes_stream()))
+        let content_type = content_type_of(&response);
+        let Some(recorder) = self.recorder.clone() else {
+            return Ok(super::stream::event_stream(response.bytes_stream()));
+        };
+        let Some(request_body) = captured else {
+            return Ok(super::stream::event_stream(response.bytes_stream()));
+        };
+        // Recording: tee the raw bytes for fidelity, and hand the
+        // finished exchange over when the turn completes (terminal
+        // `Done` seen or stream drained) — a dropped, cancelled stream
+        // records nothing.
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let bytes = tee(response.bytes_stream(), Arc::clone(&buffer));
+        let stream = super::stream::event_stream(bytes);
+        Ok(record_on_end(
+            stream,
+            request_body,
+            status.as_u16(),
+            content_type,
+            buffer,
+            recorder,
+        ))
     }
+}
+
+/// The response `content-type` header, verbatim ("" when absent).
+fn content_type_of(response: &reqwest::Response) -> String {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Pass byte chunks through while keeping a copy — only bytes the
+/// consumer actually pulled end up in the recorder's buffer.
+fn tee<S>(
+    inner: S,
+    buffer: Arc<Mutex<Vec<u8>>>,
+) -> impl Stream<Item = Result<Bytes, reqwest::Error>> + Send
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Send,
+{
+    inner.map(move |chunk| {
+        if let Ok(bytes) = &chunk {
+            buffer.lock().unwrap().extend_from_slice(bytes);
+        }
+        chunk
+    })
+}
+
+/// The recorder's per-stream state (see [`record_on_end`]).
+struct RecordState {
+    inner: EventStream,
+    request_body: String,
+    status: u16,
+    content_type: String,
+    buffer: Arc<Mutex<Vec<u8>>>,
+    recorder: Recorder,
+    fired: bool,
+}
+
+/// Hand the finished exchange to the recorder exactly once — when the
+/// terminal `Done` event passes by, or when the stream drains,
+/// whichever comes first — and never for a dropped stream.
+fn record_on_end(
+    inner: EventStream,
+    request_body: String,
+    status: u16,
+    content_type: String,
+    buffer: Arc<Mutex<Vec<u8>>>,
+    recorder: Recorder,
+) -> EventStream {
+    let state = RecordState {
+        inner,
+        request_body,
+        status,
+        content_type,
+        buffer,
+        recorder,
+        fired: false,
+    };
+    Box::pin(futures::stream::unfold(Some(state), |state| async move {
+        let mut state = state?;
+        match state.inner.next().await {
+            Some(Ok(event)) => {
+                if matches!(event, StreamEvent::Done { .. }) {
+                    fire(&mut state);
+                }
+                Some((Ok(event), Some(state)))
+            }
+            Some(Err(err)) => Some((Err(err), Some(state))),
+            None => {
+                fire(&mut state);
+                None
+            }
+        }
+    }))
+}
+
+/// Capture the buffer into one exchange — idempotent (`fired`).
+fn fire(state: &mut RecordState) {
+    if state.fired {
+        return;
+    }
+    state.fired = true;
+    let response_body = String::from_utf8_lossy(&state.buffer.lock().unwrap()).into_owned();
+    (state.recorder)(CapturedExchange {
+        request_body: std::mem::take(&mut state.request_body),
+        status: state.status,
+        content_type: std::mem::take(&mut state.content_type),
+        response_body,
+    });
 }
 
 #[cfg(test)]
