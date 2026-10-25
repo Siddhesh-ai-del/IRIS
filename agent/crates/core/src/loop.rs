@@ -591,3 +591,58 @@ pub(crate) fn plain_text(message: &Message) -> String {
         .collect::<Vec<_>>()
         .join("")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compact::CompactError;
+
+    #[test]
+    fn into_provider_unwraps_provider_and_compaction_failures() {
+        let provider = RunError::Provider(ProviderError::NoChoices);
+        assert!(matches!(provider.into_provider(), ProviderError::NoChoices));
+
+        let summarize = RunError::Compact(CompactError::Provider(ProviderError::NoChoices));
+        assert!(matches!(
+            summarize.into_provider(),
+            ProviderError::NoChoices
+        ));
+
+        // An empty summary is the closest thing to "the provider gave
+        // us nothing usable".
+        let empty = RunError::Compact(CompactError::Empty);
+        assert!(matches!(empty.into_provider(), ProviderError::NoChoices));
+    }
+
+    #[test]
+    #[should_panic(expected = "agent_loop::run records nothing")]
+    fn into_provider_refuses_to_smuggle_a_transcript_failure() {
+        RunError::Transcript(WriterError::Io(std::io::Error::other("disk full"))).into_provider();
+    }
+
+    #[test]
+    fn outcome_from_loop_outcome_maps_every_stop() {
+        assert!(matches!(
+            Outcome::from(LoopOutcome::Completed {
+                text: "hi".into(),
+                turns: 1,
+                usage: Usage::default(),
+            }),
+            Outcome::Completed
+        ));
+        assert!(matches!(
+            Outcome::from(LoopOutcome::MaxTurns {
+                turns: 2,
+                usage: Usage::default(),
+            }),
+            Outcome::MaxTurns
+        ));
+        assert!(matches!(
+            Outcome::from(LoopOutcome::BudgetExceeded {
+                turns: 3,
+                usage: Usage::default(),
+            }),
+            Outcome::BudgetExceeded
+        ));
+    }
+}

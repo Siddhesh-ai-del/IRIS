@@ -219,3 +219,58 @@ fn truncate_to(mut content: String, limit: usize) -> String {
     ));
     content
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(body: &str) -> ContentBlock {
+        ContentBlock::text(body)
+    }
+
+    #[test]
+    fn registry_names_are_namespaced_and_fully_sanitized() {
+        assert_eq!(tool_name("fs", "read_file"), "mcp_fs_read_file");
+        assert_eq!(tool_name("a-b_c", "D9"), "mcp_a-b_c_D9");
+        // Spaces, dots, punctuation — all fold to `_`.
+        assert_eq!(tool_name("my server", "do.it!"), "mcp_my_server_do_it_");
+        // Non-ASCII folds too: '/' and 'é' are both not `[A-Za-z0-9_-]`
+        // — and the separator `_` still lands between the segments.
+        assert_eq!(tool_name("srv/é", "x"), "mcp_srv___x");
+    }
+
+    #[test]
+    fn text_blocks_join_and_other_blocks_fall_back_to_json() {
+        assert_eq!(render_content(&[text("a"), text("b")]), "a\nb");
+        assert_eq!(render_content(&[]), "");
+
+        let image = ContentBlock::image("AAAA", "image/png");
+        // No block is ever silently dropped: non-text renders as JSON.
+        let rendered = render_content(&[text("first"), image]);
+        assert!(rendered.starts_with("first\n"), "{rendered}");
+        assert!(rendered.contains("image/png"), "{rendered}");
+        assert!(rendered.contains("AAAA"), "{rendered}");
+    }
+
+    #[test]
+    fn results_are_capped_on_a_char_boundary_with_an_explicit_marker() {
+        assert_eq!(truncate_to("short".into(), 100), "short");
+        assert_eq!(truncate_to("exact".into(), 5), "exact");
+
+        let cut = truncate_to("abcdefghij".into(), 4);
+        assert_eq!(
+            cut,
+            "abcd\n[iris truncated this result: showing 4 of 10 bytes]"
+        );
+
+        // 10 × 'é' = 20 bytes; a limit of 15 lands mid-character, so
+        // the cut walks back to 14 (7 whole chars), never panics.
+        let multibyte = truncate_to("é".repeat(10), 15);
+        assert!(multibyte.starts_with(&"é".repeat(7)), "{multibyte}");
+        assert!(multibyte.contains("showing 14 of 20 bytes"), "{multibyte}");
+        assert!(multibyte.starts_with('é'), "still valid text");
+
+        let empty = truncate_to("x".into(), 0);
+        assert!(empty.contains("showing 0 of 1 bytes"), "{empty}");
+    }
+}

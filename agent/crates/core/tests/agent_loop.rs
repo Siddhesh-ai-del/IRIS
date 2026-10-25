@@ -1190,3 +1190,38 @@ async fn records_per_turn_metrics_and_delivers_them_to_the_observer() {
         "the observer sees exactly what the transcript records"
     );
 }
+
+// --- coverage fills (stage 7.2) ---------------------------------------------
+
+/// The transcript is the resume primitive: a recorder that fails on
+/// the usage event aborts the run with a transcript error instead of
+/// continuing into silent amnesia (the `?` on `Recorded::Usage`).
+#[tokio::test]
+async fn a_recorder_failure_on_the_usage_event_aborts_the_run() {
+    let scripted = Scripted::new(vec![text_response("answer", 7)]);
+    let dir = workspace();
+    let config = config_from(None);
+    let ctx = ToolContext::with_gate(dir.path(), config.permission_gate());
+
+    let err = run_recorded(
+        &scripted,
+        &ToolRegistry::new(),
+        &ctx,
+        &allow_all,
+        &options(u32::MAX, u64::MAX),
+        vec![Message::text(Role::User, "go")],
+        no_observer,
+        |entry| match entry {
+            Recorded::Usage { .. } => Err(RunError::Transcript(WriterError::Io(
+                std::io::Error::other("transcript disk full"),
+            ))),
+            _ => Ok(()),
+        },
+    )
+    .await
+    .expect_err("the run must stop when the transcript cannot be written");
+    assert!(
+        matches!(err, RunError::Transcript(_)),
+        "expected a transcript abort, got {err:?}"
+    );
+}

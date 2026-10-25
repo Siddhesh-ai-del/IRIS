@@ -165,3 +165,112 @@ fn expand_rejects_a_wrong_argument_count() {
     let err = iris_core::commands::expand(&command, &extra).unwrap_err();
     assert_eq!(err.got, 2, "too many is an error, not silently ignored");
 }
+
+// --- coverage fills (stage 7.2): every way a file becomes a warning -------
+
+/// One broken file → exactly its warning, never a panic.
+fn only_warning(contents: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    write_command(dir.path(), "broken.md", contents);
+    let (commands, warnings) = load(dir.path(), &[]);
+    assert!(commands.is_empty(), "the broken file never loads");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    warnings.into_iter().next().unwrap()
+}
+
+#[test]
+fn every_parse_error_surfaces_as_its_own_warning() {
+    let cases: &[(&str, &str)] = &[
+        ("---", "unterminated frontmatter"),
+        ("---\nnonsense\n---\nBody.\n", "frontmatter lines must be"),
+        (
+            "---\ndescription: a\ndescription: b\n---\nB\n",
+            "duplicate frontmatter key `description`",
+        ),
+        (
+            "---\ndescription: a\nargs: [x]\nargs: [y]\n---\nB\n",
+            "duplicate frontmatter key `args`",
+        ),
+        ("   \n", "empty command body"),
+        (
+            "---\ndescription: x\nargs: [a,,b]\n---\nB\n",
+            "empty argument name",
+        ),
+        (
+            "---\ndescription: x\nargs: [bad name]\n---\nB\n",
+            "invalid argument name",
+        ),
+        (
+            "---\ndescription: x\nargs: [s, s]\n---\nB\n",
+            "duplicate argument",
+        ),
+    ];
+    for (contents, expect) in cases {
+        let warning = only_warning(contents);
+        assert!(warning.contains(expect), "{contents:?} → {warning}");
+    }
+}
+
+#[test]
+fn blank_frontmatter_lines_and_an_empty_args_list_are_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    write_command(
+        dir.path(),
+        "clean.md",
+        "---\ndescription: t\n\nargs: []\n---\nBody.\n",
+    );
+    let (commands, warnings) = load(dir.path(), &[]);
+    assert_eq!(warnings, Vec::<String>::new());
+    let clean = &commands["clean"];
+    assert_eq!(clean.description, "t");
+    assert!(clean.args.is_empty(), "`[]` declares no arguments");
+    assert_eq!(clean.body, "Body.");
+}
+
+#[test]
+fn an_unreadable_commands_path_warns_instead_of_panicking() {
+    let dir = tempfile::tempdir().unwrap();
+    // `.iris/commands` exists but is a file: `read_dir` fails with a
+    // non-NotFound error, which must surface as a warning.
+    fs::create_dir_all(dir.path().join(".iris")).unwrap();
+    fs::write(dir.path().join(".iris").join("commands"), "i am a file").unwrap();
+    let (commands, warnings) = load(dir.path(), &[]);
+    assert!(commands.is_empty());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("cannot read"), "{}", warnings[0]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_with_a_non_utf8_name_warns_and_is_skipped() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempfile::tempdir().unwrap();
+    let cmd_dir = dir.path().join(".iris").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(
+        cmd_dir.join(std::ffi::OsStr::from_bytes(b"\xff.md")),
+        "Body.\n",
+    )
+    .unwrap();
+    let (commands, warnings) = load(dir.path(), &[]);
+    assert!(commands.is_empty());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("not a usable command name"),
+        "{}",
+        warnings[0]
+    );
+}
+
+#[test]
+fn a_command_file_that_cannot_be_read_warns_and_the_rest_load() {
+    let dir = tempfile::tempdir().unwrap();
+    write_command(dir.path(), "good.md", "Fine.\n");
+    // A *directory* named `trap.md`: the extension and stem look
+    // right, but reading it as a file must fail into a warning.
+    fs::create_dir_all(dir.path().join(".iris").join("commands").join("trap.md")).unwrap();
+    let (commands, warnings) = load(dir.path(), &[]);
+    assert!(commands.contains_key("good"), "the rest still load");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("trap.md"), "{}", warnings[0]);
+}

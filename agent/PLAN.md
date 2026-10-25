@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 7.2 (coverage ≥80% on `iris-core` — `cargo llvm-cov`, fill gaps: permission policy matrix, assembly edge cases, redaction)
-- **Current phase:** 7 — Quality Gate (next: 7.2; 7.1 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25)
+- **Next action:** Stage 7.3 (E2E: real repo, temp git worktree — prompt → read → patch → checkpoint → resume → rewind, headless)
+- **Current phase:** 7 — Quality Gate (next: 7.3; 7.2 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -769,8 +769,24 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   per-turn exact serving, delta-streaming, and turn counts; key-free by design (no
   network in CI). 7 new tests → **431/431 green**, clippy/fmt/secret-scan clean.
 
-- [ ] **7.2 Coverage to ≥80% on `iris-core`** (1h) — `cargo llvm-cov`; fill gaps (permission policy
+- [x] **7.2 Coverage to ≥80% on `iris-core`** (1h) — `cargo llvm-cov`; fill gaps (permission policy
   matrix, assembly edge cases, redaction). Risk: Low · Depends: all
+  Done 2026-10-25: baseline was already 93.55% lines / 92.46% regions — the plan's named gaps
+  (permissions 99%, assembly 99.7%, redaction 98%) were pinned by earlier stages, so the
+  **measured** gaps were filled instead: `iris-core` **95.22% lines / 94.10% regions**
+  (workspace 93.41%), gate ≥80% ✓. 23 new tests → **454/454 green**, clippy/fmt/secret-scan
+  clean. Fills: `mcp.rs` 0% → hermetic unit tests (`tool_name` sanitization, `render_content`,
+  `truncate_to` char boundaries) + new `tests/mcp.rs` connect-failure suite (unspawnable server,
+  dies-before-handshake, per-server warnings; success path stays covered by the CLI fixture
+  server); `loop.rs` → recorder-fails-on-usage abort, `into_provider`/`Outcome` mapping unit
+  tests; hooks → failing `on_tool_post`/`on_turn_end`/`on_compact` warnings, missing-binary
+  (exit 127) warning, 4096-char preview cap; `commands.rs` → full parse/discovery error matrix
+  (unterminated, invalid line, duplicate keys, bad/duplicate/empty args, empty body, unreadable
+  dir, non-UTF8 name, directory-as-file); compaction → `render()` every role/block, total
+  `apply()` edge, empty-summarizer refusal. Remainder is unreachable by construction (loop
+  cache-bust arm: registry is `&`-immutable and stream reassembly forces Assistant role —
+  mechanism pinned by assembly tests; hooks spawn/IO arms need EPIPE races; `mcp` connect-success
+  needs a live server, covered cross-package).
 
 - [ ] **7.3 E2E: real repo, temp git worktree** (1h) — scripted scenario: prompt → read → patch →
   checkpoint → resume → rewind; run headless in CI. Risk: Medium · Depends: 6.1, 6.2

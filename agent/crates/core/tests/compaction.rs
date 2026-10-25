@@ -525,3 +525,109 @@ fn compaction_knobs_layer_from_file_and_env_into_the_loop() {
         "default config compacts at the 128k default"
     );
 }
+
+// --- coverage fills (stage 7.2) ---------------------------------------------
+
+#[test]
+fn render_labels_every_role_and_block_for_the_summarizer() {
+    let messages = vec![
+        Message::text(Role::System, "sys"),
+        Message::text(Role::User, "hey"),
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse(iris_core::types::ToolCall {
+                id: "c1".into(),
+                name: "read_file".into(),
+                input: serde_json::json!({"path": "x"}),
+            })],
+        },
+        Message {
+            role: Role::Tool,
+            content: vec![ContentBlock::ToolResult(iris_core::types::ToolResult {
+                tool_use_id: "c1".into(),
+                content: "bytes".into(),
+                is_error: false,
+            })],
+        },
+        Message {
+            role: Role::Tool,
+            content: vec![ContentBlock::ToolResult(iris_core::types::ToolResult {
+                tool_use_id: "c2".into(),
+                content: "boom".into(),
+                is_error: true,
+            })],
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Image {
+                media_type: "image/png".into(),
+                data: "AA".into(),
+            }],
+        },
+    ];
+    let rendered = compact::render(&messages);
+    assert!(rendered.contains("system: sys\n"), "{rendered}");
+    assert!(rendered.contains("user: hey\n"), "{rendered}");
+    assert!(
+        rendered.contains("assistant requested tool read_file(c1) with"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("tool result c1: bytes\n"), "{rendered}");
+    assert!(
+        rendered.contains("tool result c2: boom (error)\n"),
+        "an errored tool result says so: {rendered}"
+    );
+    assert!(
+        rendered.contains("image content omitted\n"),
+        "images are stated, never dumped: {rendered}"
+    );
+}
+
+#[test]
+fn apply_pins_the_summary_even_for_a_plan_that_lands_past_the_end() {
+    // `plan()` can only produce a start inside the conversation, but
+    // the builder stays total: a synthetic out-of-range plan still
+    // pins the summary rather than silently dropping it.
+    let messages = vec![
+        Message::text(Role::System, "sys"),
+        Message::text(Role::User, "hi"),
+    ];
+    let plan = compact::FoldPlan {
+        start: 7,
+        boundary: 7,
+        folded: 0,
+    };
+    let view = compact::apply(messages, plan, "S");
+    assert_eq!(view.len(), 3, "original two + the pinned summary");
+    assert_eq!(view[2], summary_message("S"), "the summary still lands");
+}
+
+#[tokio::test]
+async fn an_empty_summarizer_reply_refuses_to_pin_nothing() {
+    let messages = conversation(4);
+    let est = estimate(&messages);
+    let window = est * 100 / COMPACT_AT_PCT;
+    let scripted = Scripted::new(vec![text_response("   ")], vec![]);
+    let dir = workspace();
+    let ctx = ToolContext::with_gate(dir.path(), allow_gate());
+
+    let err = run_recorded(
+        &scripted,
+        &ToolRegistry::new(),
+        &ctx,
+        &DenyOnAsk,
+        &opts(window, 2),
+        messages,
+        |_event| {},
+        |_entry| Ok(()),
+    )
+    .await
+    .expect_err("pinning an empty summary would silently destroy context");
+    assert!(
+        matches!(
+            err,
+            iris_core::agent_loop::RunError::Compact(compact::CompactError::Empty)
+        ),
+        "expected the empty-summary refusal, got {err:?}"
+    );
+}

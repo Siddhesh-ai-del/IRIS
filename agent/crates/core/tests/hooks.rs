@@ -509,3 +509,178 @@ async fn default_hooks_are_silent() {
     assert!(matches!(outcome, LoopOutcome::Completed { .. }));
     assert_eq!(warnings, 0, "no configured hooks → nothing to warn about");
 }
+
+// --- coverage fills (stage 7.2): every advisory path a hook can take --------
+
+#[test]
+fn previews_are_capped_with_an_explicit_marker() {
+    assert_eq!(iris_core::hooks::preview("short"), "short");
+    let long = "é".repeat(5000);
+    let out = iris_core::hooks::preview(&long);
+    assert!(out.starts_with(&"é".repeat(4096)), "head kept verbatim");
+    assert!(
+        out.ends_with("…[iris truncated this preview]"),
+        "the drop is stated, never silent"
+    );
+    assert_eq!(
+        out.chars().count(),
+        4096 + "…[iris truncated this preview]".chars().count()
+    );
+}
+
+#[tokio::test]
+async fn a_command_sh_cannot_find_warns_and_the_run_continues() {
+    let dir = workspace();
+    let hooks = Hooks {
+        on_tool_pre: vec!["/nonexistent/iris-no-such-hook".into()],
+        ..Hooks::default()
+    };
+    let scripted = Scripted::new(
+        vec![],
+        vec![
+            tool_response(
+                "call-1",
+                "write_file",
+                json!({"path": "x.txt", "content": "y"}),
+            ),
+            text_response("done"),
+        ],
+    );
+    let ctx = ToolContext::with_gate(dir.path(), allow_gate());
+    let mut warnings: Vec<String> = Vec::new();
+
+    let outcome = run(
+        &scripted,
+        &write_registry(),
+        &ctx,
+        &DenyOnAsk,
+        &options(hooks),
+        initial(),
+        |event| {
+            if let LoopEvent::HookWarning(message) = &event {
+                warnings.push(message.clone());
+            }
+        },
+    )
+    .await
+    .expect("the run completes");
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        warnings.len(),
+        1,
+        "one unfindable command, one warning: {warnings:?}"
+    );
+    assert!(warnings[0].contains("on_tool_pre"), "{}", warnings[0]);
+    // Hooks run through `sh -c`, so a missing binary is a non-zero
+    // exit — advisory like any other hook failure.
+    assert!(warnings[0].contains("exit status: 127"), "{}", warnings[0]);
+}
+
+#[tokio::test]
+async fn failing_post_and_turn_end_hooks_warn_but_the_results_stand() {
+    let dir = workspace();
+    let hooks = Hooks {
+        on_tool_post: vec!["exit 9".into()],
+        on_turn_end: vec!["exit 7".into()],
+        ..Hooks::default()
+    };
+    let scripted = Scripted::new(
+        vec![],
+        vec![
+            tool_response(
+                "call-1",
+                "write_file",
+                json!({"path": "x.txt", "content": "y"}),
+            ),
+            text_response("done"),
+        ],
+    );
+    let ctx = ToolContext::with_gate(dir.path(), allow_gate());
+    let mut warnings: Vec<String> = Vec::new();
+
+    let outcome = run(
+        &scripted,
+        &write_registry(),
+        &ctx,
+        &DenyOnAsk,
+        &options(hooks),
+        initial(),
+        |event| {
+            if let LoopEvent::HookWarning(message) = &event {
+                warnings.push(message.clone());
+            }
+        },
+    )
+    .await
+    .expect("the run completes");
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "{outcome:?}"
+    );
+    // One tool turn + two completed turns: the tool's `on_tool_post`
+    // warns once, `on_turn_end` once per turn.
+    assert_eq!(warnings.len(), 3, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("on_tool_post") && w.contains("exit status: 9")),
+        "{warnings:?}"
+    );
+    assert_eq!(
+        warnings
+            .iter()
+            .filter(|w| w.contains("on_turn_end") && w.contains("exit status: 7"))
+            .count(),
+        2,
+        "turn_end warns on every turn, final one included: {warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_compact_hook_warns_but_the_fold_still_applies() {
+    let dir = workspace();
+    let hooks = Hooks {
+        on_compact: vec!["exit 9".into()],
+        ..Hooks::default()
+    };
+    let messages = conversation(4);
+    let est = estimate(&messages);
+    let window = est * 100 / COMPACT_AT_PCT; // exactly at the trigger
+    let mut opts = options(hooks);
+    opts.compact = Some(CompactOpts { window, keep: 2 });
+
+    let scripted = Scripted::new(
+        vec![text_response("PINNED-SUMMARY")],
+        vec![text_response("final answer")],
+    );
+    let ctx = ToolContext::with_gate(dir.path(), allow_gate());
+    let mut warnings: Vec<String> = Vec::new();
+    let mut folded = false;
+
+    let outcome = run(
+        &scripted,
+        &ToolRegistry::new(),
+        &ctx,
+        &DenyOnAsk,
+        &opts,
+        messages,
+        |event| match event {
+            LoopEvent::HookWarning(message) => warnings.push(message.clone()),
+            LoopEvent::Compact { .. } => folded = true,
+            _ => {}
+        },
+    )
+    .await
+    .expect("the run completes");
+    assert!(
+        matches!(outcome, LoopOutcome::Completed { .. }),
+        "{outcome:?}"
+    );
+    assert!(folded, "the fold itself still applied");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("on_compact"), "{}", warnings[0]);
+    assert!(warnings[0].contains("exit status: 9"), "{}", warnings[0]);
+}
