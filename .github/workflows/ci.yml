@@ -1,0 +1,29 @@
+name: ci
+
+# Headless quality gate (stage 7.3): format, lint, and the full
+# hermetic test suite — httpmock providers only, no network egress and
+# no secrets, so the E2E scenario (`crates/cli/tests/scenario.rs`)
+# runs exactly as it does locally. Mirrors `just ci` in `agent/`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Format (check only)
+        run: cargo fmt --all --check
+
+      - name: Clippy (-D warnings)
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+      - name: Test (hermetic — no network, no keys)
+        run: cargo test --workspace --all-features

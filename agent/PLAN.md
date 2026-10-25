@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Stage 7.3 (E2E: real repo, temp git worktree — prompt → read → patch → checkpoint → resume → rewind, headless)
-- **Current phase:** 7 — Quality Gate (next: 7.3; 7.2 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25)
+- **Next action:** Stage 7.4 (Security + release hardening — `ecc:security-audit`, dependency audit, release profile, single-binary smoke test, README onboarding)
+- **Current phase:** 7 — Quality Gate (next: 7.4; 7.3 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -788,8 +788,21 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   mechanism pinned by assembly tests; hooks spawn/IO arms need EPIPE races; `mcp` connect-success
   needs a live server, covered cross-package).
 
-- [ ] **7.3 E2E: real repo, temp git worktree** (1h) — scripted scenario: prompt → read → patch →
+- [x] **7.3 E2E: real repo, temp git worktree** (1h) — scripted scenario: prompt → read → patch →
   checkpoint → resume → rewind; run headless in CI. Risk: Medium · Depends: 6.1, 6.2
+  Done 2026-10-25: new `crates/cli/tests/scenario.rs` drives the whole lifecycle through the
+  **real binary** against a temp git worktree and a local mock provider — hermetic (fake key,
+  `IRIS_PROVIDER_BASE_URL`, pinned `IRIS_SESSIONS_DIR`), zero network. One scripted test: `run`
+  (read_file → apply_patch with a real unified diff changes the file on disk; exit 0, session id
+  parsed) → `checkpoint create/list` → `sessions resume` (the mock **demands** the prior turn's
+  patch result, so a resume that forgets history 404s; the resumed run diverges the worktree) →
+  `checkpoint restore` (patched state back, post-checkpoint file removed, HEAD untouched).
+  RED: first run rejected the fixture patch (context lines missing their unified-diff leading
+  space — `malformed patch`, max_turns loop); GREEN after the fix. **455/455 green**. "Headless
+  in CI": new `.github/workflows/ci.yml` (official `actions/checkout` only; `fmt --check`,
+  clippy `-D warnings`, `cargo test --workspace` — verified locally as the fallback path) and
+  `justfile` `ci` recipe switched to check-mode format (`fmt-check` added — CI never mutates).
+  clippy/fmt/secret-scan clean.
 
 - [ ] **7.4 Security + release hardening** (1h) — `ecc:security-audit`, dependency audit
   (`cargo vet`/`cargo deny`), strip + `opt-level` release, single-binary smoke test, `README` with

@@ -113,10 +113,11 @@ configured provider and leaves none behind, the dependency graph may not grow a
 second HTTP client or a telemetry SDK, and `iris doctor` spells out exactly what
 leaves the machine. The whole privacy stack has been validated live against the
 real OpenRouter API with a free model — real streaming, a real tool call, $0.00
-cost. Next up: Phase 7 (7.3: E2E scenarios next). Everything is built under
-test-driven development (454 tests, with `iris-core` at 95% line coverage), with recorded
-HTTP cassettes replaying real
-OpenRouter streaming and tool-loop conversations hermetically in CI. There are no
+cost. Next up: Phase 7 (7.4: release hardening next). Everything is built under
+test-driven development (455 tests, `iris-core` at 95% line coverage), with recorded
+HTTP cassettes replaying real OpenRouter streaming and tool-loop conversations
+hermetically — every push runs that gate headlessly through GitHub Actions
+(`just ci`: format check, clippy, full suite). There are no
 versioned releases yet.
 
 ### Roadmap
@@ -132,7 +133,7 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 4 | Terminal UI (composer, streaming pane, status bar, diff review) | ✅ Complete |
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | ✅ Complete |
-| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | 🔵 In progress (7.3) |
+| 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | 🔵 In progress (7.4) |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
 and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
