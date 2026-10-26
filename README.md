@@ -153,10 +153,10 @@ Getting started takes three steps:
 [releases page](../../releases), for example on Linux x86_64:
 
 ```bash
-curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.0/iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz
-curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.0/iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.1/iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.1/iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 …or build from source (toolchain pinned in
