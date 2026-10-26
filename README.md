@@ -4,6 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache--2.0-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=apache&logoColor=white)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Pre--release-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rocket&logoColor=white)](#project-status)
+[![Release](https://img.shields.io/github/v/release/Siddhesh-ai-del/IRIS?style=for-the-badge&label=Release&labelColor=0F172A&color=0F172A)](../../releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=gnometerminal&logoColor=white)](#roadmap)
 [![Language](https://img.shields.io/badge/Language-Rust-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rust&logoColor=white)](#architecture)
 
@@ -119,7 +120,9 @@ Everything is built under test-driven development (455 tests, `iris-core` at
 streaming and tool-loop conversations hermetically — every push runs that gate
 headlessly through GitHub Actions: format check, clippy, the full suite, a
 `cargo deny` dependency audit, and a release-build smoke test that runs the
-binary standalone. There are no versioned releases yet.
+binary standalone. Versioned releases — prebuilt tarballs with `.sha256`
+checksums for Linux x86_64/aarch64 and macOS arm64 — publish automatically
+on every `v*` tag.
 
 ### Roadmap
 
@@ -142,13 +145,22 @@ support, worktree replay A/B, local (GGUF) inference mode.
 
 ## Installation
 
-**No releases yet** — IRIS has no published binaries. When a first release ships,
-install instructions will appear here and on the [releases page](../../releases).
+Every `v*` tag publishes a release with prebuilt tarballs — Linux
+(x86_64, aarch64) and macOS (arm64) — each with a `.sha256` checksum.
+Getting started takes three steps:
 
-Getting started takes three steps (Rust toolchain is pinned in
+**Step 1 — get the binary** — download from the
+[releases page](../../releases), for example on Linux x86_64:
+
+```bash
+curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.0/iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.0/iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf iris-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+```
+
+…or build from source (toolchain pinned in
 [`agent/rust-toolchain.toml`](agent/rust-toolchain.toml)):
-
-**Step 1 — build the binary:**
 
 ```bash
 git clone https://github.com/Siddhesh-ai-del/IRIS
@@ -161,19 +173,21 @@ config files):
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-…
-./target/release/iris doctor   # confirms key presence, egress, telemetry-off
 ```
 
 **Step 3 — run it:**
 
 ```bash
-./target/release/iris run -p "list the files here and summarize what this project is"
-./target/release/iris chat     # the interactive shell (Phase 4)
+iris doctor   # confirms key presence, egress, telemetry-off
+iris run -p "list the files here and summarize what this project is"
+iris chat     # the interactive shell
 ```
 
-The release build is a single self-contained binary — no sidecar files,
-no runtime dependencies (`just smoke` verifies it runs standalone with a
-clean environment).
+Here `iris` means the extracted `iris-<version>-<target>/iris` from the
+release tarball (or add it to your `PATH`); if you built from source it
+is `./target/release/iris`. The release build is a single
+self-contained binary — no sidecar files, no runtime dependencies
+(`just smoke` verifies it runs standalone with a clean environment).
 
 `iris run -p` streams model text to stdout, tool events to stderr, and exits with
 the agent outcome (`0` completed · `1` error · `3` max turns · `4` token budget).

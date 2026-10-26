@@ -1,0 +1,72 @@
+name: release
+
+# Build and publish a GitHub Release when a version tag (v*) is pushed.
+# Each matrix target runs the same packaging script used locally
+# (agent/scripts/package.sh): release build -> standalone smoke test ->
+# tarball + sha256. A publish job then re-verifies every checksum and
+# uploads all artifacts in one release. Tag only from a green `main`.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match the workspace version
+        run: |
+          pkg="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          test "${GITHUB_REF_NAME#v}" = "$pkg" || {
+            echo "tag $GITHUB_REF_NAME != workspace version $pkg" >&2
+            exit 1
+          }
+
+      - name: Package (build + smoke + tarball + sha256)
+        run: bash scripts/package.sh "${GITHUB_REF_NAME#v}" "${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: agent/dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify checksums
+        run: cd dist && sha256sum -c *.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "IRIS $GITHUB_REF_NAME" \
+            --generate-notes

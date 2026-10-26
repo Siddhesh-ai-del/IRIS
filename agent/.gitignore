@@ -6,6 +6,9 @@
 /coverage/
 /llvm-cov-target/
 
+# Release packaging output (scripts/package.sh)
+/dist/
+
 # IRIS runtime state (sessions, checkpoints) lives outside the repo
 .iris/
 
