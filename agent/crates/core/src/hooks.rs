@@ -139,7 +139,11 @@ enum FireError {
 
 /// Spawn `sh -c command` with `cwd`, deliver the payload on stdin,
 /// and wait under **one** deadline — killing the child when the
-/// deadline expires or delivery fails, so no orphaned hook lingers.
+/// deadline expires or delivery fails hard, so no orphaned hook
+/// lingers. A child that closes stdin without reading it (`exit 9`,
+/// `exec 0<&-`) gets EPIPE on the write: that is a *declined payload*,
+/// not a failed delivery — the payload is advisory and the child's
+/// exit status is the contract — so it is still reaped normally.
 async fn run_one(
     command: &str,
     cwd: &Path,
@@ -164,7 +168,15 @@ async fn run_one(
     // flush would leave it blocked on read until the timeout).
     let mut stdin = child.stdin.take().expect("stdin was piped");
     let deliver = async move {
-        stdin.write_all(payload).await.map_err(FireError::Io)?;
+        match stdin.write_all(payload).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                // The child closed stdin without reading — the
+                // payload was declined. Not an error: reap the exit
+                // status instead of reporting a bare broken pipe.
+            }
+            Err(err) => return Err(FireError::Io(err)),
+        }
         drop(stdin);
         Ok::<(), FireError>(())
     };
@@ -191,5 +203,31 @@ async fn run_one(
             let _ = child.kill().await;
             Err(FireError::Timeout)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// A child that closes stdin without reading it must still be
+    /// reaped for its **exit status** — an EPIPE on payload delivery
+    /// means "declined the payload", not "delivery failed". The
+    /// payload here is larger than any default pipe buffer, so the
+    /// write is guaranteed to be pending when the child closes the
+    /// read end: EPIPE every time, no scheduling race.
+    #[tokio::test]
+    async fn a_child_that_closes_stdin_still_reports_its_exit_status() {
+        let payload = vec![b'x'; 256 * 1024];
+        let status = run_one(
+            "exec 0<&-; exit 9",
+            Path::new("."),
+            &payload,
+            Duration::from_secs(10),
+        )
+        .await
+        .expect("a closed stdin is a declined payload, not a delivery failure");
+        assert_eq!(status.code(), Some(9));
     }
 }
