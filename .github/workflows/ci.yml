@@ -51,3 +51,17 @@ jobs:
 
       - name: Single-binary smoke test (release build, clean env)
         run: bash scripts/smoke.sh
+
+  # Stage 8.1+: Windows portability. Test step only — the Unix-ism
+  # inventory (8.1) is produced from this job's failures; fmt/clippy
+  # are host-independent and stay in the Linux job.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test (hermetic — no network, no keys)
+        run: cargo test --workspace --all-features

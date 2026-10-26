@@ -35,8 +35,8 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** v0.1.1 released (v0.1.0 shipped first; the hook EPIPE fix landed after the tag, so 0.1.1 supersedes it) — post-v1 work is tracked in the **Deferred** backlog
-- **Current phase:** Release — v0.1.1
+- **Next action:** post-v1 v0.2 plan — Phase 8 (Windows portability), stage 8.1 (Windows CI skeleton + Unix-ism inventory)
+- **Current phase:** 8 — Windows portability (next: 8.1; v0.2 plan written)
 - **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete)
 
 ### Environment notes (observed 2026-09-30)
@@ -824,11 +824,97 @@ Tick boxes are the progress meter. **Pause after each stage for sign-off (D2).**
   (fmt + clippy + tests + audit) exit 0, `cargo test` fallback exit 0, smoke green, YAML valid,
   secret-scan clean. **All planned stages complete.**
 
-## Deferred (post-v1 backlog)
+## Post-v1 plan (v0.2) — six phases (all original deferred items except the Anthropic client)
 
-Worktree replay A/B (wedge #3) · supervised GGUF mode · Windows support · ACP/app-server mode ·
-in-TUI hunk annotation loop (wedge #4) · cross-agent transcript importers ·
-native Anthropic `/v1/messages` client (stage 1.4, when a direct `ANTHROPIC_API_KEY` exists).
+Same rules as v0.1: staged TDD (RED → GREEN → REFACTOR), sign-off after each stage,
+conventional commits, `just ci` green at every push. **Platform first** (Phase 8) so every
+feature after it ships portable code instead of being retrofitted.
+
+### Phase 8 — Windows portability (5 stages, ~5h)
+
+- [ ] **8.1 Windows CI skeleton + Unix-ism inventory** (1h) — add a `windows-latest` job to
+  `.github/workflows/ci.yml` (test step only); capture the exact compile/runtime failure list
+  (known suspects: `shell.rs` unconditional `std::os::unix::io::RawFd`, hooks `sh -c`,
+  unix-only test fixtures, `GIT_CONFIG_*=/dev/null`, `env -i` hermetic runs). Done when: the
+  Windows runner reports an **exact** red list — test names/errors, not guesses. Risk: Medium ·
+  Depends: none
+- [ ] **8.2 Core portability: hooks + paths** (1.5h) — cfg-gated command shells (`sh -c` on
+  unix, `cmd /C` on windows) for hooks, windows-safe path/canonicalize handling, test fixtures
+  portable. Done when: `iris-core` green on `windows-latest`. Risk: Medium · Depends: 8.1
+- [ ] **8.3 Shell tool on Windows** (1.5h) — replace the raw-fd reader with a portable
+  `portable-pty` handle reader (ConPTY path), default shell per-OS, cfg-gated unix tests get
+  windows equivalents. Done when: shell tool suite green on both OSes. Risk: Medium · Depends: 8.2
+- [ ] **8.4 CLI + TUI + E2E suites green on Windows** (1h) — harness portability (hermetic env
+  without `env -i`, null-device paths, temp perms), checkpoint/scenario suites. Done when: full
+  matrix (linux × windows) green. Risk: Medium · Depends: 8.3
+- [ ] **8.5 Windows release artifacts** (0.5h) — `x86_64-pc-windows-msvc` in the release
+  matrix, README platform notes. Risk: Low · Depends: 8.4
+
+### Phase 9 — Worktree replay A/B (wedge #3) (3 stages, ~3h)
+
+- [ ] **9.1 `iris checkpoint diff <id>`** (1h) — checkpoint vs working tree (`--against <id>`
+  for two checkpoints) via git plumbing, raw unified output. Risk: Low · Depends: 6.1
+- [ ] **9.2 `iris checkpoint ab <idA> <idB>`** (1.5h) — materialize both snapshots as
+  git-linked worktrees under `.iris/worktrees/`, print paths + summary; main worktree
+  untouched. Risk: Medium · Depends: 9.1
+- [ ] **9.3 A/B E2E + cleanup** (0.5h) — scenario: create → mutate → `ab` → both trees
+  byte-match their snapshots → `iris checkpoint ab --clean` removes them. Risk: Low ·
+  Depends: 9.2
+
+### Phase 10 — In-TUI hunk annotation loop (wedge #4) (3 stages, ~3h)
+
+- [ ] **10.1 Annotation input on a focused hunk** (1h) — diff view: `a` opens multiline input
+  bound to the selected hunk, Esc cancels; frame snapshots. Risk: Medium · Depends: 4.6
+- [ ] **10.2 Submit → follow-up turn** (1h) — annotation + hunk context compiled into one user
+  message (file, hunk number, quoted diff, annotation) dispatched in the same session; pending
+  diff drops. Risk: Medium · Depends: 10.1
+- [ ] **10.3 Round-trip tests** (1h) — app-state tests for input/submit/cancel plus a full
+  loop round-trip against the mock provider. Risk: Low · Depends: 10.2
+
+### Phase 11 — Cross-agent transcript importers (3 stages, ~3h)
+
+- [ ] **11.1 Format research + fixtures** (1h) — pin Claude Code session JSONL and Codex
+  rollout shapes as synthetic fixtures (`crates/core/tests/corpus/import/`), mapping table →
+  IRIS envelope v0. Risk: Medium · Depends: 2.1
+- [ ] **11.2 `iris sessions import`** (1.5h) — detect format, translate messages/tool
+  calls/usage → envelope v0 **through the redactor**; unknown shapes fail loud with line
+  numbers. Risk: High (garbage-in) · Depends: 11.1
+- [ ] **11.3 Import → list → resume E2E** (0.5h) — an imported session lists and resumes
+  against the mock provider. Risk: Low · Depends: 11.2
+
+### Phase 12 — Supervised GGUF mode (3 stages, ~3.5h)
+
+- [ ] **12.1 Loopback keyless provider** (1h) — relax the key requirement **only** when
+  `provider_base_url` is loopback (`127.0.0.1`/`[::1]`/`localhost`); doctor says "local
+  provider — no key". Security-sensitive: never relax for non-loopback. Risk: Medium ·
+  Depends: 1.10
+- [ ] **12.2 `iris gguf` server supervision** (1.5h) — spawn the configured server command
+  (default `llama-server`) with the model path, poll `/v1/models` readiness, run against it,
+  tear the child down on every exit path. Hermetic tests with a fake server — no weights
+  needed. Risk: Medium · Depends: 12.1
+- [ ] **12.3 Supervised defaults + docs** (1h) — gguf mode overlays ask-by-default permission
+  policy (nothing silently allowed without a hosted provider's context), README section,
+  ignored live test behind `IRIS_GGUF_MODEL`. Risk: Low · Depends: 12.2
+
+### Phase 13 — ACP / app-server mode (4 stages, ~5h)
+
+- [ ] **13.1 JSON-RPC stdio skeleton + `initialize`** (1.5h) — `iris acp` subcommand:
+  line-delimited JSON-RPC 2.0 over stdio, initialize handshake (version + capability
+  negotiation), method routing, standard error codes; hermetic pipe-driven tests. Risk: Medium ·
+  Depends: 1.7
+- [ ] **13.2 `session/new` + `session/prompt` + `session/update` streaming** (1.5h) — map IRIS
+  loop events → ACP update notifications (message chunks, tool calls) and stop reasons;
+  mock-provider E2E over pipes. Risk: Medium · Depends: 13.1
+- [ ] **13.3 `session/request_permission` + `session/cancel`** (1h) — gate asks routed to the
+  client; cancel notification interrupts the run via the existing cancellation seam. Risk: Medium ·
+  Depends: 13.2
+- [ ] **13.4 `session/load` resume + compatibility pass + docs** (1h) — advertise and implement
+  `loadSession`, run the protocol against the documented flows, README. Risk: Low · Depends: 13.3
+
+## Deferred (still out of scope)
+
+Native Anthropic `/v1/messages` client (stage 1.4) — blocked on a direct `ANTHROPIC_API_KEY` by
+decision D4/D6; revisit when one exists.
 
 ## Dependencies & risks (summary)
 
