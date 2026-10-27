@@ -364,21 +364,38 @@ fn normalize_newlines(bytes: &[u8]) -> String {
     }
 }
 
-/// ConPTY's connection chatter — the cursor-inherit query (`ESC[6n`) and
-/// the mode enables conhost sends on attach — lands at the front of every
-/// Windows capture before the child prints anything. It is the pty talking
-/// to *us*, not the command's output; unix captures have no equivalent.
-/// Repeated sequences are stripped (conhost may re-query), but only as a
-/// prefix: a command that legitimately prints these later keeps them.
+/// ConPTY's connection chatter lands at the front of every Windows capture
+/// before the child prints anything — it is the pty talking to *us*, not
+/// the command's output; unix captures have no equivalent. Two waves, both
+/// prefix-only: the attach handshake (cursor-inherit query + mode enables)
+/// and conhost/cmd's startup render (attribute reset, cmd's title change
+/// forwarded as OSC 0, cursor show). Stripping stops at the first byte
+/// that is not one of these, so a command that legitimately opens with its
+/// own ANSI sequence keeps it.
 #[cfg(windows)]
 fn strip_conpty_chatter(content: &str) -> String {
-    const CHATTER: [&str; 3] = ["\x1b[6n", "\x1b[?9001h", "\x1b[?1004h"];
+    const FIXED: [&str; 5] = [
+        "\x1b[6n",     // inherit-cursor query
+        "\x1b[?9001h", // win32-input-mode enable
+        "\x1b[?1004h", // focus-reporting enable
+        "\x1b[m",      // SGR reset (initial render)
+        "\x1b[?25h",   // cursor show (initial render)
+    ];
     let mut rest = content;
     loop {
         let before = rest;
-        for seq in CHATTER {
+        for seq in FIXED {
             if let Some(tail) = rest.strip_prefix(seq) {
                 rest = tail;
+            }
+        }
+        // cmd sets its window title at startup: `ESC]0;<title>BEL`
+        // (variable content — matched to its terminator, BEL or ST).
+        if let Some(after) = rest.strip_prefix("\x1b]0;") {
+            if let Some(bel) = after.find('\x07') {
+                rest = &after[bel + 1..];
+            } else if let Some(st) = after.find("\x1b\\") {
+                rest = &after[st + 2..];
             }
         }
         if rest.len() == before.len() {
@@ -458,7 +475,7 @@ mod tests {
     mod platform {
         pub const PIPE: &str = "echo hello | findstr hello";
         pub const MERGED_STDERR: &str = "echo danger 1>&2";
-        pub const MULTI_LINE: &str = "echo a & echo b";
+        pub const MULTI_LINE: &str = "echo a&echo b";
         // ~1.1 MB over the cap; cmd has no `seq`, and a for-loop of
         // builtin echos stays fast enough for the 60s default timeout.
         pub const HUGE: &str =
