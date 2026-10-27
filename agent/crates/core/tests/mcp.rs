@@ -12,6 +12,13 @@ use iris_core::config::{McpConfig, McpServerConfig};
 use iris_core::mcp;
 use iris_core::tools::ToolRegistry;
 
+/// The immediate-exit server command: spawns fine, exits before the
+/// handshake — cmd.exe's own `exit`, the Windows twin of `sh -c`.
+#[cfg(unix)]
+const INSTANT_EXIT: (&str, &[&str]) = ("sh", &["-c", "exit 0"]);
+#[cfg(windows)]
+const INSTANT_EXIT: (&str, &[&str]) = ("cmd", &["/C", "exit 0"]);
+
 fn server(command: &str, args: &[&str]) -> McpServerConfig {
     McpServerConfig {
         command: command.to_string(),
@@ -73,7 +80,7 @@ async fn an_unreachable_server_degrades_to_a_warning() {
 async fn a_server_that_dies_before_the_handshake_degrades_to_a_warning() {
     let mut registry = ToolRegistry::new();
     // Spawns fine, exits immediately — `initialize` never completes.
-    let cfg = config(&[("flaky", server("sh", &["-c", "exit 0"]))]);
+    let cfg = config(&[("flaky", server(INSTANT_EXIT.0, INSTANT_EXIT.1))]);
 
     let (connections, warnings) = mcp::connect(&cfg, &mut registry).await;
     assert_eq!(warnings.len(), 1, "{warnings:?}");
@@ -94,7 +101,7 @@ async fn one_broken_server_never_blocks_the_others_from_the_config() {
     // order (BTreeMap), and neither stops the other's attempt.
     let cfg = config(&[
         ("a_ghost", server("/nonexistent/iris-mcp-fixture", &[])),
-        ("b_flaky", server("sh", &["-c", "exit 0"])),
+        ("b_flaky", server(INSTANT_EXIT.0, INSTANT_EXIT.1)),
     ]);
 
     let (connections, warnings) = mcp::connect(&cfg, &mut registry).await;

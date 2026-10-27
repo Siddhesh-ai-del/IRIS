@@ -21,6 +21,31 @@ use iris_core::tokens;
 use iris_core::tools::{Decision, DenyOnAsk, Gate, ToolContext, ToolRegistry, WriteTool};
 use iris_core::types::{ContentBlock, Message, Role, StopReason, ToolCall, Usage};
 
+// --- platform shell commands --------------------------------------------
+
+/// A hook that copies the payload from stdin to `dest`.
+#[cfg(unix)]
+fn capture(dest: &std::path::Path, append: bool) -> String {
+    format!("cat {} {}", if append { ">>" } else { ">" }, dest.display())
+}
+#[cfg(windows)]
+fn capture(dest: &std::path::Path, append: bool) -> String {
+    // `more` passes piped stdin through to stdout — cmd's nearest
+    // equivalent of `cat` (no cat.exe exists).
+    format!(
+        "more {} {}",
+        if append { ">>" } else { ">" },
+        dest.display()
+    )
+}
+
+/// A hook that runs far past any test timeout — never finishes on its
+/// own (`sleep` on unix; cmd has no sleep, ping waits ~1s per hop).
+#[cfg(unix)]
+const LONG_HOOK: &str = "sleep 30";
+#[cfg(windows)]
+const LONG_HOOK: &str = "ping -n 30 127.0.0.1 > nul";
+
 // --- fixtures ------------------------------------------------------------
 
 /// Provider that scripts summarizer (`complete`) and turn
@@ -195,8 +220,8 @@ async fn tool_hooks_fire_around_a_dispatch_with_the_call_payload() {
     let pre_path = dir.path().join("pre.json");
     let post_path = dir.path().join("post.json");
     let hooks = Hooks {
-        on_tool_pre: vec![format!("cat > {}", pre_path.display())],
-        on_tool_post: vec![format!("cat > {}", post_path.display())],
+        on_tool_pre: vec![capture(&pre_path, false)],
+        on_tool_post: vec![capture(&post_path, false)],
         ..Hooks::default()
     };
     let scripted = Scripted::new(
@@ -254,7 +279,7 @@ async fn turn_end_fires_once_per_turn_with_stop_reason_and_usage() {
     // Payloads arrive newline-terminated, so two fires land as two
     // parseable JSON lines, not one glued blob.
     let hooks = Hooks {
-        on_turn_end: vec![format!("cat >> {}", path.display())],
+        on_turn_end: vec![capture(&path, true)],
         ..Hooks::default()
     };
     let scripted = Scripted::new(
@@ -303,7 +328,7 @@ async fn compact_hook_reports_the_fold_and_pinned_summary() {
     let dir = workspace();
     let path = dir.path().join("compact.json");
     let hooks = Hooks {
-        on_compact: vec![format!("cat > {}", path.display())],
+        on_compact: vec![capture(&path, false)],
         ..Hooks::default()
     };
     let messages = conversation(4);
@@ -391,7 +416,7 @@ async fn a_failing_hook_warns_but_never_stops_the_run() {
 async fn a_timed_out_hook_is_killed_and_the_run_continues_quickly() {
     let dir = workspace();
     let hooks = Hooks {
-        on_turn_end: vec!["sleep 30".into()],
+        on_turn_end: vec![LONG_HOOK.into()],
         timeout_secs: 1,
         ..Hooks::default()
     };
@@ -437,7 +462,7 @@ async fn payloads_pass_the_redaction_chokepoint_before_leaving() {
     let path = dir.path().join("pre.json");
     let key = "sk-or-v1-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
     let hooks = Hooks {
-        on_tool_pre: vec![format!("cat > {}", path.display())],
+        on_tool_pre: vec![capture(&path, false)],
         ..Hooks::default()
     };
     let scripted = Scripted::new(
@@ -529,7 +554,7 @@ fn previews_are_capped_with_an_explicit_marker() {
 }
 
 #[tokio::test]
-async fn a_command_sh_cannot_find_warns_and_the_run_continues() {
+async fn a_command_the_shell_cannot_find_warns_and_the_run_continues() {
     let dir = workspace();
     let hooks = Hooks {
         on_tool_pre: vec!["/nonexistent/iris-no-such-hook".into()],
@@ -574,9 +599,16 @@ async fn a_command_sh_cannot_find_warns_and_the_run_continues() {
         "one unfindable command, one warning: {warnings:?}"
     );
     assert!(warnings[0].contains("on_tool_pre"), "{}", warnings[0]);
-    // Hooks run through `sh -c`, so a missing binary is a non-zero
-    // exit — advisory like any other hook failure.
+    // The platform shell's own "not found" code — 127 (sh), 9009 or 1
+    // (cmd) — either way a non-zero, advisory failure.
+    #[cfg(unix)]
     assert!(warnings[0].contains("exit status: 127"), "{}", warnings[0]);
+    #[cfg(windows)]
+    assert!(
+        warnings[0].contains("exit status: 9009") || warnings[0].contains("exit status: 1"),
+        "{}",
+        warnings[0]
+    );
 }
 
 #[tokio::test]

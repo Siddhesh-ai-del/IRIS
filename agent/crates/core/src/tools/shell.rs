@@ -380,6 +380,38 @@ mod tests {
     use crate::tools::ToolRegistry;
     use serde_json::json;
 
+    /// Platform command table: the test bodies are shared, only the
+    /// shell syntax differs (`sh` vs `cmd.exe`).
+    #[cfg(unix)]
+    mod platform {
+        pub const PIPE: &str = "echo hello | cat";
+        pub const MERGED_STDERR: &str = "echo danger >&2";
+        pub const MULTI_LINE: &str = "printf 'a\\nb\\n'";
+        // ~1.7 MB of output against the 256 KiB cap.
+        pub const HUGE: &str = "seq 1 300000";
+        pub fn sleep_then_touch(marker: &std::path::Path) -> String {
+            format!("sleep 2 && touch {}", marker.display())
+        }
+    }
+    #[cfg(windows)]
+    mod platform {
+        pub const PIPE: &str = "echo hello | findstr hello";
+        pub const MERGED_STDERR: &str = "echo danger 1>&2";
+        pub const MULTI_LINE: &str = "echo a & echo b";
+        // ~1.1 MB over the cap; cmd has no `seq`, and a for-loop of
+        // builtin echos stays fast enough for the 60s default timeout.
+        pub const HUGE: &str =
+            "for /L %i in (1,1,30000) do @echo 0123456789012345678901234567890123";
+        pub fn sleep_then_touch(marker: &std::path::Path) -> String {
+            // ping waits ~1s per hop: 3 hops ≈ 2s, past the 1s timeout.
+            format!(
+                "ping -n 3 127.0.0.1 > nul && echo x> \"{}\"",
+                marker.display()
+            )
+        }
+    }
+    use platform::*;
+
     fn workspace() -> (tempfile::TempDir, ToolContext) {
         let dir = tempfile::tempdir().expect("tempdir");
         let ctx = ToolContext::new(dir.path());
@@ -500,15 +532,15 @@ mod tests {
         let (_dir, ctx) = workspace();
         // A pipeline only works if a *shell* parsed the line — and it is
         // valid in both POSIX shells and fish (the user's $SHELL may be
-        // either).
-        let result = run(&ctx, "echo hello | cat", None).await.unwrap();
+        // either); on Windows cmd parses its own pipeline syntax.
+        let result = run(&ctx, PIPE, None).await.unwrap();
         assert_eq!(result.content.trim(), "hello");
     }
 
     #[tokio::test]
     async fn stderr_arrives_merged_through_the_pty() {
         let (_dir, ctx) = workspace();
-        let result = run(&ctx, "echo danger >&2", None).await.unwrap();
+        let result = run(&ctx, MERGED_STDERR, None).await.unwrap();
         assert!(
             result.content.contains("danger"),
             "stderr must be captured (merged on a pty): {:?}",
@@ -531,19 +563,21 @@ mod tests {
     #[tokio::test]
     async fn command_runs_in_the_workspace_root() {
         let (dir, ctx) = workspace();
-        let result = run(&ctx, "pwd", None).await.unwrap();
-        let canonical = dir.path().canonicalize().unwrap();
+        // A file probe, not a path echo: cmd's `cd` and unix `pwd`
+        // format paths differently from `canonicalize()`, but a file
+        // appearing in the workspace root proves the cwd either way.
+        let result = run(&ctx, "echo probe > cwd_probe.txt", None).await.unwrap();
+        assert!(!result.is_error, "{:?}", result.content);
         assert!(
-            result.content.contains(canonical.to_str().unwrap()),
-            "cwd must be the workspace root: {:?}",
-            result.content
+            dir.path().join("cwd_probe.txt").exists(),
+            "the workspace root must be the process cwd"
         );
     }
 
     #[tokio::test]
     async fn carriage_returns_from_the_line_discipline_are_gone() {
         let (_dir, ctx) = workspace();
-        let result = run(&ctx, "printf 'a\\nb\\n'", None).await.unwrap();
+        let result = run(&ctx, MULTI_LINE, None).await.unwrap();
         assert!(!result.content.contains('\r'), "{:?}", result.content);
         assert!(result.content.contains("a\nb"), "{:?}", result.content);
     }
@@ -551,8 +585,7 @@ mod tests {
     #[tokio::test]
     async fn huge_output_is_truncated_with_visible_notice() {
         let (_dir, ctx) = workspace();
-        // ~1.7 MB of output against the 256 KiB cap.
-        let result = run(&ctx, "seq 1 300000", None).await.unwrap();
+        let result = run(&ctx, HUGE, None).await.unwrap();
         assert!(result.content.len() <= MAX_OUTPUT_BYTES + 200);
         assert!(
             result.content.contains("[iris: output truncated at"),
@@ -566,7 +599,7 @@ mod tests {
         let marker = dir.path().join("survived");
         // If the sleep survived the kill it would touch the marker at ~2s;
         // we check well after that.
-        let command = format!("sleep 2 && touch {}", marker.display());
+        let command = sleep_then_touch(&marker);
 
         let started = Instant::now();
         let result = run(&ctx, &command, Some(1)).await.unwrap();

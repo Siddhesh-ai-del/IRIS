@@ -203,6 +203,13 @@ fn sessions_list_on_an_empty_store_succeeds_silently() {
     );
 }
 
+/// A command long enough that the process is still mid-call when the
+/// test kills it (`ping` waits ~1s per hop — cmd.exe has no `sleep`).
+#[cfg(unix)]
+const LONG_SHELL: &str = "sleep 20";
+#[cfg(windows)]
+const LONG_SHELL: &str = "ping -n 20 127.0.0.1 > nul";
+
 /// The stage's done-when: **run, kill, resume, the model sees prior
 /// turns.**
 ///
@@ -258,7 +265,7 @@ fn run_kill_resume_rehydrates_prior_turns() {
                 &format!(
                     "{}{}",
                     text_delta("Kicking off the sleeper."),
-                    tool_delta(0, "call_1", "run_command", &json!({"command": "sleep 20"}))
+                    tool_delta(0, "call_1", "run_command", &json!({"command": LONG_SHELL}))
                 ),
                 "tool_calls",
                 (10, 5, 15),

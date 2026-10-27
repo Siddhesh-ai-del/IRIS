@@ -137,7 +137,8 @@ enum FireError {
     Timeout,
 }
 
-/// Spawn `sh -c command` with `cwd`, deliver the payload on stdin,
+/// Spawn the platform shell to run `command` (`sh -c` on unix,
+/// `cmd /C` on Windows) with `cwd`, deliver the payload on stdin,
 /// and wait under **one** deadline — killing the child when the
 /// deadline expires or delivery fails hard, so no orphaned hook
 /// lingers. A child that closes stdin without reading it (`exit 9`,
@@ -159,6 +160,29 @@ fn shell_command(command: &str) -> Command {
     let mut child = Command::new("cmd");
     child.arg("/C").arg(command);
     child
+}
+
+/// Kill the hook and everything it spawned. tokio's `kill()` only hits
+/// the direct child — on Windows that is `cmd.exe`, whose grandchildren
+/// (the actual hook command) would outlive the deadline and break the
+/// no-orphaned-hook contract, so the tree goes down with it.
+#[cfg(unix)]
+async fn kill_hook(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+}
+
+#[cfg(windows)]
+async fn kill_hook(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+    }
+    let _ = child.kill().await;
 }
 
 async fn run_one(
@@ -199,11 +223,11 @@ async fn run_one(
     match tokio::time::timeout(remaining, deliver).await {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
-            let _ = child.kill().await;
+            kill_hook(&mut child).await;
             return Err(err);
         }
         Err(_) => {
-            let _ = child.kill().await;
+            kill_hook(&mut child).await;
             return Err(FireError::Timeout);
         }
     }
@@ -215,7 +239,7 @@ async fn run_one(
         Ok(Ok(status)) => Ok(status),
         Ok(Err(err)) => Err(FireError::Io(err)),
         Err(_) => {
-            let _ = child.kill().await;
+            kill_hook(&mut child).await;
             Err(FireError::Timeout)
         }
     }
@@ -232,17 +256,22 @@ mod tests {
     /// payload here is larger than any default pipe buffer, so the
     /// write is guaranteed to be pending when the child closes the
     /// read end: EPIPE every time, no scheduling race.
+    ///
+    /// Unix: `exec 0<&-` closes the read end explicitly. Windows:
+    /// `cmd` never reads stdin at all — it exits immediately, tearing
+    /// the pipe down under the still-pending 256 KiB write. Same
+    /// broken-pipe contract, same test.
     #[tokio::test]
     async fn a_child_that_closes_stdin_still_reports_its_exit_status() {
+        #[cfg(unix)]
+        const DECLINE: &str = "exec 0<&-; exit 9";
+        #[cfg(windows)]
+        const DECLINE: &str = "exit 9";
+
         let payload = vec![b'x'; 256 * 1024];
-        let status = run_one(
-            "exec 0<&-; exit 9",
-            Path::new("."),
-            &payload,
-            Duration::from_secs(10),
-        )
-        .await
-        .expect("a closed stdin is a declined payload, not a delivery failure");
+        let status = run_one(DECLINE, Path::new("."), &payload, Duration::from_secs(10))
+            .await
+            .expect("a closed stdin is a declined payload, not a delivery failure");
         assert_eq!(status.code(), Some(9));
     }
 }
