@@ -46,6 +46,14 @@ const LONG_HOOK: &str = "sleep 30";
 #[cfg(windows)]
 const LONG_HOOK: &str = "ping -n 30 127.0.0.1 > nul";
 
+/// How std's `ExitStatus` Display words an exit code — platform-different
+/// by design ("exit status: 9" on unix, "exit code: 9" on Windows).
+/// Hook warnings quote it verbatim, so assertions match on this.
+#[cfg(unix)]
+const STATUS_WORDING: &str = "exit status";
+#[cfg(windows)]
+const STATUS_WORDING: &str = "exit code";
+
 // --- fixtures ------------------------------------------------------------
 
 /// Provider that scripts summarizer (`complete`) and turn
@@ -311,6 +319,11 @@ async fn turn_end_fires_once_per_turn_with_stop_reason_and_usage() {
     let raw = std::fs::read_to_string(&path).expect("on_turn_end fired");
     let events: Vec<Value> = raw
         .lines()
+        // Windows' `more >>` capture pads blank lines the unix `cat`
+        // path never produces; payloads are the lines that matter. A
+        // capture that produced *nothing* still fails the count below,
+        // with `raw` in the message.
+        .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("each line is one JSON payload"))
         .collect();
     assert_eq!(events.len(), 2, "one payload per turn: {raw}");
@@ -409,7 +422,11 @@ async fn a_failing_hook_warns_but_never_stops_the_run() {
         "one failing command → one warning: {warnings:?}"
     );
     assert!(warnings[0].contains("on_tool_pre"), "{}", warnings[0]);
-    assert!(warnings[0].contains("exit status: 9"), "{}", warnings[0]);
+    assert!(
+        warnings[0].contains(&format!("{STATUS_WORDING}: 9")),
+        "{}",
+        warnings[0]
+    );
 }
 
 #[tokio::test]
@@ -602,10 +619,15 @@ async fn a_command_the_shell_cannot_find_warns_and_the_run_continues() {
     // The platform shell's own "not found" code — 127 (sh), 9009 or 1
     // (cmd) — either way a non-zero, advisory failure.
     #[cfg(unix)]
-    assert!(warnings[0].contains("exit status: 127"), "{}", warnings[0]);
+    assert!(
+        warnings[0].contains(&format!("{STATUS_WORDING}: 127")),
+        "{}",
+        warnings[0]
+    );
     #[cfg(windows)]
     assert!(
-        warnings[0].contains("exit status: 9009") || warnings[0].contains("exit status: 1"),
+        warnings[0].contains(&format!("{STATUS_WORDING}: 9009"))
+            || warnings[0].contains(&format!("{STATUS_WORDING}: 1")),
         "{}",
         warnings[0]
     );
@@ -658,13 +680,13 @@ async fn failing_post_and_turn_end_hooks_warn_but_the_results_stand() {
     assert!(
         warnings
             .iter()
-            .any(|w| w.contains("on_tool_post") && w.contains("exit status: 9")),
+            .any(|w| w.contains("on_tool_post") && w.contains(&format!("{STATUS_WORDING}: 9"))),
         "{warnings:?}"
     );
     assert_eq!(
         warnings
             .iter()
-            .filter(|w| w.contains("on_turn_end") && w.contains("exit status: 7"))
+            .filter(|w| w.contains("on_turn_end") && w.contains(&format!("{STATUS_WORDING}: 7")))
             .count(),
         2,
         "turn_end warns on every turn, final one included: {warnings:?}"
@@ -714,5 +736,9 @@ async fn a_failing_compact_hook_warns_but_the_fold_still_applies() {
     assert!(folded, "the fold itself still applied");
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains("on_compact"), "{}", warnings[0]);
-    assert!(warnings[0].contains("exit status: 9"), "{}", warnings[0]);
+    assert!(
+        warnings[0].contains(&format!("{STATUS_WORDING}: 9")),
+        "{}",
+        warnings[0]
+    );
 }
