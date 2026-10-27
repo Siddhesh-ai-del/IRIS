@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Phase 8 (Windows portability), stage 8.3 — shell tool runtime tests on Windows (full suite, not `--no-run`)
-- **Current phase:** 8 — Windows portability (next: 8.3; 8.1–8.2 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete)
+- **Next action:** Phase 8 (Windows portability), stage 8.4 — CLI + TUI + E2E suites green on Windows (already passing in the 8.3 windows job; stage likely shrinks to confirmation)
+- **Current phase:** 8 — Windows portability (next: 8.4; 8.1–8.3 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete), 8.1 ✅ (2026-10-27), 8.2 ✅ (2026-10-27), 8.3 ✅ (2026-10-27; windows job full-matrix green)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -862,10 +862,29 @@ feature after it ships portable code instead of being retrofitted.
   in-process trigger). Verified no change needed: `GIT_CONFIG_*=/dev/null` fixtures (git
   silently ignores missing config files — probe confirmed), symlink/OsStrExt tests already
   gated, cli/tui portable (`std::Child::kill` only).
-- [ ] **8.3 Shell tool on Windows** (1.5h) — Windows test equivalents for the unix shell/hook
+- [x] **8.3 Shell tool on Windows** (1.5h) — Windows test equivalents for the unix shell/hook
   test commands (cmd-compatible), ConPTY runtime behavior. Done when: `iris-core` test suite
   green on both OSes (the windows job runs the full suite, not `--no-run`). Risk: Medium ·
   Depends: 8.2
+  Done 2026-10-27: run 40464506010 — windows job fully green (all 6 steps: core unit 282 ✓,
+  core process ✓, core integration ✓, CLI ✓, TUI ✓), linux `ci` ✓ 457/457, `smoke` ✓; commits
+  e893a35…c575a93 (7 red→green cycles, each RED captured on the runner first). Product fixes:
+  `path.rs` counts Prefix/RootDir as structural (verbatim `\\?\C:` is not stat-able — one failed
+  lstat emptied `existing` and poisoned 35 resolves) and treats `has_root()` as absolute;
+  `shell.rs` keeps the ConPTY input writer open on Windows (closing it reads as terminal
+  hangup — child died 0xC000013A), the reader answers conhost's inherit-cursor query `ESC[6n`
+  with `ESC[1;1R` (unanswered = session never starts → 60s timeouts), `strip_conpty_chatter`
+  removes handshake + startup render (`ESC[m`, OSC 0 title, `ESC[?25h`) as a prefix only;
+  `checkpoint.rs` pins `-c core.autocrlf=false` on every call (Git for Windows/runner default
+  rewrote line endings on restore — restore's contract is byte-exact; new test
+  `restore_is_byte_exact_even_when_the_repo_requests_conversion` reproduces the host policy at
+  repo scope, red→green). Test-side: canonical-space comparisons (`canonical_join`, sessions
+  cwd — same pattern as the run-resume test), symlink tests `#[cfg(unix)]`, `STATUS_WORDING`
+  for std's per-platform `ExitStatus` Display, `MULTI_LINE` = `echo a&echo b`, turn_end filters
+  cmd's `more >>` blank-line padding (count assert still prints `raw`), chat no-tty test uses
+  `DETACHED_PROCESS` + bounded 15s wait, windows job split into 6 timeout-bounded steps.
+  Note: the windows job runs the CLI and TUI suites too — both green here, which covers most
+  of 8.4's scope ahead of it.
 - [ ] **8.4 CLI + TUI + E2E suites green on Windows** (1h) — harness portability (hermetic env
   without `env -i`, null-device paths, temp perms), checkpoint/scenario suites. Done when: full
   matrix (linux × windows) green. Risk: Medium · Depends: 8.3

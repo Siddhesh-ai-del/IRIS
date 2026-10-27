@@ -115,11 +115,12 @@ second HTTP client or a telemetry SDK, and `iris doctor` spells out exactly what
 leaves the machine. The whole privacy stack has been validated live against the
 real OpenRouter API with a free model — real streaming, a real tool call, $0.00
 cost. **All seven phases of the implementation plan are now complete.**
-Everything is built under test-driven development (455 tests, `iris-core` at
+Everything is built under test-driven development (457 tests, `iris-core` at
 95% line coverage), with recorded HTTP cassettes replaying real OpenRouter
 streaming and tool-loop conversations hermetically — every push runs that gate
-headlessly through GitHub Actions: format check, clippy, the full suite, a
-`cargo deny` dependency audit, and a release-build smoke test that runs the
+headlessly through GitHub Actions: format check, clippy, the full suite on
+Linux **and Windows**, a `cargo deny` dependency audit, and a release-build
+smoke test that runs the
 binary standalone. Versioned releases — prebuilt tarballs with `.sha256`
 checksums for Linux x86_64/aarch64 and macOS arm64 — publish automatically
 on every `v*` tag.
@@ -138,10 +139,12 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 5 | Privacy (secret redaction, telemetry-off guarantee) | ✅ Complete |
 | 6 | Parity features (checkpoints, compaction, MCP, hooks, custom commands) | ✅ Complete |
 | 7 | Quality gate (coverage ≥ 80%, E2E scenarios, release hardening) | ✅ Complete |
+| 8–13 | Post-v1: Windows portability, worktree replay, annotation, importers, GGUF, ACP | 🚧 In progress |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
 and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
-support, worktree replay A/B, local (GGUF) inference mode.
+release artifacts (the full test suite already runs on `windows-latest` in CI), worktree
+replay A/B, local (GGUF) inference mode.
 
 ## Installation
 
