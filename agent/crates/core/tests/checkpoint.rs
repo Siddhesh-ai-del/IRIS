@@ -143,3 +143,33 @@ fn create_never_disturbs_head_or_index() {
     assert_eq!(restored.written, 3);
     assert_eq!(read(repo, "a.txt"), "dirty\n");
 }
+
+#[test]
+fn restore_is_byte_exact_even_when_the_repo_requests_conversion() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    // Git for Windows and CI runners ship core.autocrlf=true; stated at
+    // repo scope (plus eol=crlf, which forces the conversion on every
+    // platform) so the contract is provable here, not only on Windows.
+    // Checkpoints are undo snapshots of private orphan commits: restore
+    // must return the captured bytes, never a line-ending policy's idea
+    // of them.
+    git(repo, &["config", "core.autocrlf", "true"]);
+    git(repo, &["config", "core.eol", "crlf"]);
+
+    let created = checkpoint::create(repo, "conversion-proof").expect("create");
+    let blob = git(
+        repo,
+        &["cat-file", "blob", &format!("{}:a.txt", created.commit)],
+    );
+    assert_eq!(blob, "v1\n", "the checkpoint must store worktree bytes");
+
+    fs::write(repo.join("a.txt"), "v2\r\n").unwrap();
+    let restored = checkpoint::restore(repo, &created.id).expect("restore");
+    assert_eq!(restored.written, 3);
+    assert_eq!(
+        read(repo, "a.txt"),
+        "v1\n",
+        "restore must not rewrite line endings"
+    );
+}

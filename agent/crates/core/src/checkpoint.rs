@@ -257,7 +257,20 @@ fn git_with_env(
     args: &[&str],
 ) -> Result<String, CheckpointError> {
     let mut command = Command::new("git");
-    command.current_dir(repo).args(args).stdin(Stdio::null());
+    // Checkpoints are undo snapshots: restore's whole contract is that
+    // it returns the captured bytes. Git's line-ending normalisation
+    // (core.autocrlf — true by default in Git for Windows and on CI
+    // runners) would rewrite endings on `add` and again on
+    // `checkout-index`, silently changing files an undo promised to put
+    // back. The checkpoint commits are private orphan refs nothing else
+    // ever reads, so there is nothing to normalise *for* — pin raw
+    // behaviour on every call. (A repo's own .gitattributes text rules
+    // still win over config: that is the repo's declared policy.)
+    command
+        .current_dir(repo)
+        .args(["-c", "core.autocrlf=false"])
+        .args(args)
+        .stdin(Stdio::null());
     if let Some((key, path)) = env {
         command.env(key, path);
     }
