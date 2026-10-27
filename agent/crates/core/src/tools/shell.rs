@@ -17,6 +17,7 @@
 //! trailer on failure, timeout trailer + kill, truncation trailer.
 
 use std::io::Read as _;
+use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::time::{Duration, Instant};
@@ -108,13 +109,20 @@ impl Tool for RunCommandTool {
         drop(pair.slave);
         // We never send stdin. On unix the master write half must go now or
         // a stdin-reading child never sees EOF (a master fd is a single
-        // bidirectional fd). On Windows that writer *is* the terminal:
-        // closing it makes conhost treat the session as hung up — it tears
-        // the console down and kills the child with STATUS_CONTROL_C_EXIT
-        // (0xC000013A) before it runs anything. Leave it be; it closes
-        // with the pty at the end of this call.
+        // bidirectional fd). On Windows the writer is the terminal's voice:
+        // closing it reads as the terminal hanging up — conhost tears the
+        // session down and the child dies with 0xC000013A — and leaving
+        // conhost's inherit-cursor query unanswered blocks the session
+        // before the child runs at all. The reader owns the handle on
+        // Windows: it answers `ESC[6n` like a real terminal, and the pipe
+        // closes when the reader does.
         #[cfg(unix)]
-        drop(pair.master.take_writer().ok());
+        let input: Option<Box<dyn std::io::Write + Send>> = {
+            drop(pair.master.take_writer().ok());
+            None
+        };
+        #[cfg(windows)]
+        let input = pair.master.take_writer().ok();
 
         let pid = child.process_id();
 
@@ -135,7 +143,7 @@ impl Tool for RunCommandTool {
             .map_err(|err| self.failed(format!("pty reader unavailable: {err}")))?;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let deadline = Instant::now() + timeout + Duration::from_secs(KILL_GRACE_SECS);
-        tokio::task::spawn_blocking(move || read_pty(reader, deadline, tx));
+        tokio::task::spawn_blocking(move || read_pty(reader, input, deadline, tx));
 
         // Reap via a poll loop so `child` stays borrowable for the kill.
         let (exit, timed_out) = match tokio::time::timeout(timeout, poll_exit(child.as_mut())).await
@@ -225,16 +233,38 @@ enum Capture {
 /// Worker thread: stream pty output until EOF/EIO or the hard deadline.
 /// Never blocks (non-blocking fd + short poll); forwards chunks and lets
 /// the receiver apply the size cap.
+///
+/// It also plays the outer terminal's half of ConPTY's inherit-cursor
+/// handshake on Windows: conhost writes `ESC[6n` and blocks the session
+/// until the "terminal" answers `ESC[row;colR` on the input pipe — we
+/// answer `1;1` (conhost's own assumed startup position), or the child
+/// never runs. `input` is `None` on unix, where the pty does no handshake.
 fn read_pty(
     mut reader: Box<dyn std::io::Read + Send>,
+    mut input: Option<Box<dyn std::io::Write + Send>>,
     deadline: Instant,
     tx: mpsc::UnboundedSender<Capture>,
 ) {
     let mut buf = [0u8; 8192];
+    // Rolling tail so a query split across two reads is still seen.
+    let mut tail: Vec<u8> = Vec::new();
+    let mut answered = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break, // child side fully closed
             Ok(n) => {
+                if !answered && input.is_some() {
+                    tail.extend_from_slice(&buf[..n]);
+                    if tail.windows(4).any(|window| window == b"\x1b[6n")
+                        && let Some(terminal) = input.as_mut()
+                        && terminal.write_all(b"\x1b[1;1R").is_ok()
+                    {
+                        answered = true;
+                    }
+                    if tail.len() > 8 {
+                        tail.drain(..tail.len() - 4);
+                    }
+                }
                 if tx.send(Capture::Chunk(buf[..n].to_vec())).is_err() {
                     break; // receiver gone
                 }
