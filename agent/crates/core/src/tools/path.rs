@@ -40,8 +40,11 @@ pub fn resolve_within(tool: &str, root: &Path, requested: &Path) -> Result<PathB
 
     // Absolute inputs stand alone; relative ones anchor at the canonical
     // root. Lexical pass first — `..` must never depend on where symlinks
-    // point.
-    let joined = if requested.is_absolute() {
+    // point. `has_root` matters on Windows: `/etc/passwd` there is
+    // *root-relative* (drive-less), not absolute — but it still points
+    // outside the workspace unless anchored, so it stands alone like an
+    // absolute path. On unix the two are equivalent: behaviour unchanged.
+    let joined = if requested.is_absolute() || requested.has_root() {
         requested.to_path_buf()
     } else {
         canonical_root.join(requested)
@@ -98,6 +101,15 @@ fn split_existing_prefix(path: &Path) -> (PathBuf, Vec<OsString>) {
     let mut existing = PathBuf::new();
     let mut missing: Vec<OsString> = Vec::new();
     for comp in path.components() {
+        // Root structure — Windows drive prefix, root separator — is not a
+        // filesystem entry: a verbatim `\\?\C:` cannot be stat'd on its own,
+        // and one failed stat here would push every later component into
+        // `missing` and empty `existing` (every resolve then failing with
+        // os error 3). Count it as existing; lstat starts at real names.
+        if missing.is_empty() && matches!(comp, Component::Prefix(_) | Component::RootDir) {
+            existing.push(comp.as_os_str());
+            continue;
+        }
         let candidate = existing.join(comp.as_os_str());
         if missing.is_empty() && candidate.symlink_metadata().is_ok() {
             existing = candidate;
@@ -137,6 +149,15 @@ mod tests {
         fn resolve(&self, requested: &str) -> Result<PathBuf, ToolError> {
             resolve_within("test", &self.root, Path::new(requested))
         }
+
+        /// Expected resolve() result for a relative tail: the *canonical*
+        /// root plus the tail. Windows results are verbatim (`\\?\`)
+        /// canonical paths while `root` itself is neither canonical nor
+        /// (with 8.3 short names) the same spelling — compare in canonical
+        /// space, where both sides mean the same path.
+        fn canonical_join(&self, rel: &str) -> PathBuf {
+            self.root.canonicalize().unwrap().join(rel)
+        }
     }
 
     #[test]
@@ -146,14 +167,14 @@ mod tests {
         std::fs::write(fix.root.join("sub/file.rs"), "x").unwrap();
 
         let got = fix.resolve("sub/file.rs").unwrap();
-        assert_eq!(got, fix.root.join("sub/file.rs"));
+        assert_eq!(got, fix.canonical_join("sub/file.rs"));
     }
 
     #[test]
     fn not_yet_existing_path_resolves_for_writes() {
         let fix = Fixture::new();
         let got = fix.resolve("brand/new/file.txt").unwrap();
-        assert_eq!(got, fix.root.join("brand/new/file.txt"));
+        assert_eq!(got, fix.canonical_join("brand/new/file.txt"));
     }
 
     #[test]
@@ -161,7 +182,7 @@ mod tests {
         let fix = Fixture::new();
         std::fs::create_dir(fix.root.join("sub")).unwrap();
         let got = fix.resolve("sub/../sub/./file.rs").unwrap();
-        assert_eq!(got, fix.root.join("sub/file.rs"));
+        assert_eq!(got, fix.canonical_join("sub/file.rs"));
     }
 
     #[test]
@@ -178,7 +199,7 @@ mod tests {
         let got = fix
             .resolve(fix.root.join("ok.txt").to_str().unwrap())
             .unwrap();
-        assert_eq!(got, fix.root.join("ok.txt"));
+        assert_eq!(got, fix.canonical_join("ok.txt"));
     }
 
     #[test]
@@ -211,45 +232,47 @@ mod tests {
         assert!(matches!(err, ToolError::PathEscape { .. }), "got {err:?}");
     }
 
+    // Symlink-dependent: creating one on Windows needs privileges or
+    // developer mode, so this escape route is exercised on unix only.
+    #[cfg(unix)]
     #[test]
     fn directory_symlink_escape_is_rejected() {
         let fix = Fixture::new();
         std::fs::write(fix.outside.join("secret.txt"), "x").unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&fix.outside, fix.root.join("link")).unwrap();
 
         let err = fix.resolve("link/secret.txt").unwrap_err();
         assert!(matches!(err, ToolError::PathEscape { .. }), "got {err:?}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn file_symlink_escape_is_rejected() {
         let fix = Fixture::new();
         let victim = fix.outside.join("victim.txt");
         std::fs::write(&victim, "original").unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&victim, fix.root.join("flink")).unwrap();
 
         let err = fix.resolve("flink").unwrap_err();
         assert!(matches!(err, ToolError::PathEscape { .. }), "got {err:?}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn in_root_symlink_stays_allowed() {
         let fix = Fixture::new();
         std::fs::create_dir(fix.root.join("real")).unwrap();
         std::fs::write(fix.root.join("real/file.rs"), "x").unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(fix.root.join("real"), fix.root.join("alias")).unwrap();
 
         let got = fix.resolve("alias/file.rs").unwrap();
         assert_eq!(got, fix.root.join("real/file.rs"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn broken_symlink_is_an_error_not_an_escape() {
         let fix = Fixture::new();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(fix.outside.join("nowhere"), fix.root.join("bl")).unwrap();
 
         let err = fix.resolve("bl").unwrap_err();

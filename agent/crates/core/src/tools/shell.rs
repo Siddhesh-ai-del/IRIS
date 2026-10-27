@@ -106,8 +106,14 @@ impl Tool for RunCommandTool {
             .map_err(|err| self.failed(format!("spawn failed: {err}")))?;
         // The child holds its own slave fds; ours must go or EOF never comes.
         drop(pair.slave);
-        // We never send stdin; close the write half (matters on Windows —
-        // a unix pty master fd is a single bidirectional fd).
+        // We never send stdin. On unix the master write half must go now or
+        // a stdin-reading child never sees EOF (a master fd is a single
+        // bidirectional fd). On Windows that writer *is* the terminal:
+        // closing it makes conhost treat the session as hung up — it tears
+        // the console down and kills the child with STATUS_CONTROL_C_EXIT
+        // (0xC000013A) before it runs anything. Leave it be; it closes
+        // with the pty at the end of this call.
+        #[cfg(unix)]
         drop(pair.master.take_writer().ok());
 
         let pid = child.process_id();
@@ -190,6 +196,8 @@ impl Tool for RunCommandTool {
         }
 
         let output = normalize_newlines(&bytes);
+        #[cfg(windows)]
+        let output = strip_conpty_chatter(&output);
         let (content, is_error) = assemble_content(&output, exit, timed_out, truncated, timeout);
         Ok(ToolResult {
             tool_use_id: String::new(),
@@ -323,6 +331,29 @@ fn normalize_newlines(bytes: &[u8]) -> String {
         text.replace("\r\n", "\n")
     } else {
         text.into_owned()
+    }
+}
+
+/// ConPTY's connection chatter — the cursor-inherit query (`ESC[6n`) and
+/// the mode enables conhost sends on attach — lands at the front of every
+/// Windows capture before the child prints anything. It is the pty talking
+/// to *us*, not the command's output; unix captures have no equivalent.
+/// Repeated sequences are stripped (conhost may re-query), but only as a
+/// prefix: a command that legitimately prints these later keeps them.
+#[cfg(windows)]
+fn strip_conpty_chatter(content: &str) -> String {
+    const CHATTER: [&str; 3] = ["\x1b[6n", "\x1b[?9001h", "\x1b[?1004h"];
+    let mut rest = content;
+    loop {
+        let before = rest;
+        for seq in CHATTER {
+            if let Some(tail) = rest.strip_prefix(seq) {
+                rest = tail;
+            }
+        }
+        if rest.len() == before.len() {
+            return rest.to_string();
+        }
     }
 }
 
