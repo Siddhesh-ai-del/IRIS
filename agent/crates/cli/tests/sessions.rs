@@ -177,9 +177,15 @@ fn sessions_list_shows_saved_sessions_newest_first() {
     assert_eq!(lines.len(), 2, "one line per session, got: {stdout}");
     assert!(lines[0].contains(&second), "newest first: {stdout}");
     assert!(lines[1].contains(&first), "oldest last: {stdout}");
+    // The manifest records the canonical workspace root — verbatim
+    // (`\\?\C:\...`) on Windows, plain elsewhere. Compare in canonical
+    // space, like the run-resume test above.
+    let canonical_work = work.path().canonicalize().expect("canonical workdir");
     assert!(
-        lines[0].contains("openai/gpt-4o-mini") && lines[0].contains(work.path().to_str().unwrap()),
-        "model and cwd make sessions recognizable: {stdout}"
+        lines[0].contains("openai/gpt-4o-mini")
+            && lines[0].contains(canonical_work.to_str().unwrap()),
+        "model and cwd make sessions recognizable (want {}): {stdout}",
+        canonical_work.display()
     );
     assert_eq!(reply.calls(), 2, "both runs hit the provider");
 }
