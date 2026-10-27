@@ -60,7 +60,14 @@ fn spawn_chat_without_a_tty(dir: &std::path::Path) -> std::process::Output {
 
 #[cfg(windows)]
 fn spawn_chat_without_a_tty(dir: &std::path::Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_iris"))
+    use std::os::windows::process::CommandExt;
+    // DETACHED_PROCESS ≈ setsid: the child gets no console at all, so
+    // crossterm's CONIN$ lookup fails (it opens the *console*, never
+    // the piped stdin) and raw-mode setup reports the clean error
+    // instead of starting a TUI on the runner's console.
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_iris"))
         .arg("chat")
         .arg("--workdir")
         .arg(dir)
@@ -68,8 +75,30 @@ fn spawn_chat_without_a_tty(dir: &std::path::Path) -> std::process::Output {
         .env_remove("OPENROUTER_API_KEY")
         .env("IRIS_SESSIONS_DIR", dir.join("sessions"))
         .env("OPENROUTER_API_KEY", "sk-or-v1-e2e-fake")
-        .output()
-        .expect("iris chat must spawn")
+        .creation_flags(DETACHED_PROCESS)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("iris chat must spawn");
+
+    // Bounded wait: if chat ever reaches a TUI instead of failing, kill
+    // it — a suite hang is never an acceptable failure mode.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                break;
+            }
+            Err(err) => panic!("reaping chat failed: {err}"),
+        }
+    }
+    child.wait_with_output().expect("iris chat must be reaped")
 }
 
 #[test]

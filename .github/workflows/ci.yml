@@ -52,15 +52,33 @@ jobs:
       - name: Single-binary smoke test (release build, clean env)
         run: bash scripts/smoke.sh
 
-  # Stage 8.3+: Windows runs the full suite. fmt/clippy are
+  # Stage 8.3+: Windows runs the full suite, split per target so a
+  # failure (or hang) is attributable from the completed steps' live
+  # logs; the job timeout bounds any future hang. fmt/clippy are
   # host-independent and stay in the Linux job.
   windows:
     runs-on: windows-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: agent
     steps:
       - uses: actions/checkout@v7
 
-      - name: Test (hermetic — no network, no keys)
-        run: cargo test --workspace --all-features
+      - name: Compile all test binaries
+        run: cargo test --workspace --all-features --no-run
+
+      - name: Core unit tests (shell, hooks, loop, provider)
+        run: cargo test -p iris-core --all-features --lib
+
+      - name: Core process tests (hooks, mcp, checkpoint, commands)
+        run: cargo test -p iris-core --all-features --test hooks --test mcp --test checkpoint --test commands
+
+      - name: Core suite (remaining integration)
+        run: cargo test -p iris-core --all-features --test agent_loop --test cassettes --test compaction --test dynamic_tools --test redaction --test redaction_corpus --test redaction_props --test telemetry_off
+
+      - name: CLI suite
+        run: cargo test -p iris --all-features
+
+      - name: TUI suite
+        run: cargo test -p iris-tui --all-features
