@@ -35,8 +35,8 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** post-v1 v0.2 plan — Phase 8 (Windows portability), stage 8.1 (Windows CI skeleton + Unix-ism inventory)
-- **Current phase:** 8 — Windows portability (next: 8.1; v0.2 plan written)
+- **Next action:** Phase 8 (Windows portability), stage 8.2 — core portability: hooks + paths
+- **Current phase:** 8 — Windows portability (next: 8.2; 8.1 complete)
 - **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete)
 
 ### Environment notes (observed 2026-09-30)
@@ -832,12 +832,22 @@ feature after it ships portable code instead of being retrofitted.
 
 ### Phase 8 — Windows portability (5 stages, ~5h)
 
-- [ ] **8.1 Windows CI skeleton + Unix-ism inventory** (1h) — add a `windows-latest` job to
+- [x] **8.1 Windows CI skeleton + Unix-ism inventory** (1h) — add a `windows-latest` job to
   `.github/workflows/ci.yml` (test step only); capture the exact compile/runtime failure list
   (known suspects: `shell.rs` unconditional `std::os::unix::io::RawFd`, hooks `sh -c`,
   unix-only test fixtures, `GIT_CONFIG_*=/dev/null`, `env -i` hermetic runs). Done when: the
   Windows runner reports an **exact** red list — test names/errors, not guesses. Risk: Medium ·
   Depends: none
+  Done 2026-10-26: run 40260962569 — linux `ci` ✓, `smoke` ✓, `windows` ✗ as designed (RED).
+  **Exact red list (compile layer — tests never start):** 10 errors, all in
+  `crates/core/src/tools/shell.rs`: `:20` `std::os::unix::io::RawFd` (E0433); `:110`
+  `as_raw_fd()` on `Box<dyn MasterPty>` (E0599); `:255` `fcntl`/`F_GETFL`/`F_SETFL`
+  (3× E0425); `:263` `fcntl`/`F_SETFL` (2×); `:265` `O_NONBLOCK` + `killpg`/`pid_t`/`SIGKILL`
+  (E0425 cluster) — the non-blocking reader and the process-group kill path. Deps (aws-lc-sys,
+  libsqlite3-sys, rusqlite) **built fine** on the runner — the local cross-check blockers were
+  cross-compile artifacts only. **Behind this wall (revealed stage by stage):** hooks `sh -c`
+  (runtime), cfg-gated unix test bodies (`path.rs`/`write.rs`), test-harness fixtures
+  (`GIT_CONFIG_*=/dev/null`, `env -i`, PTY assumptions), ConPTY runtime behavior.
 - [ ] **8.2 Core portability: hooks + paths** (1.5h) — cfg-gated command shells (`sh -c` on
   unix, `cmd /C` on windows) for hooks, windows-safe path/canonicalize handling, test fixtures
   portable. Done when: `iris-core` green on `windows-latest`. Risk: Medium · Depends: 8.1
