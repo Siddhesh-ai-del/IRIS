@@ -52,9 +52,11 @@ jobs:
       - name: Single-binary smoke test (release build, clean env)
         run: bash scripts/smoke.sh
 
-  # Stage 8.1+: Windows portability. Test step only — the Unix-ism
-  # inventory (8.1) is produced from this job's failures; fmt/clippy
-  # are host-independent and stay in the Linux job.
+  # Stage 8.1+: Windows portability. `--no-run` is the stage-8.2
+  # compile gate (the Unix-ism inventory came from this job's
+  # failures); 8.3 flips it to a full run once the shell/hook tests
+  # are portable. fmt/clippy are host-independent and stay in the
+  # Linux job.
   windows:
     runs-on: windows-latest
     defaults:
@@ -63,5 +65,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Test (hermetic — no network, no keys)
-        run: cargo test --workspace --all-features
+      - name: Test compile gate (hermetic — no network, no keys)
+        run: cargo test --workspace --all-features --no-run

@@ -144,15 +144,30 @@ enum FireError {
 /// `exec 0<&-`) gets EPIPE on the write: that is a *declined payload*,
 /// not a failed delivery — the payload is advisory and the child's
 /// exit status is the contract — so it is still reaped normally.
+/// The platform shell running `command` as `sh -c …` (unix) or
+/// `cmd /C …` (Windows), stdin/stdout/stderr piped. One spawn shape
+/// shared by every hook so payload delivery and deadlines stay uniform.
+#[cfg(unix)]
+fn shell_command(command: &str) -> Command {
+    let mut child = Command::new("sh");
+    child.arg("-c").arg(command);
+    child
+}
+
+#[cfg(windows)]
+fn shell_command(command: &str) -> Command {
+    let mut child = Command::new("cmd");
+    child.arg("/C").arg(command);
+    child
+}
+
 async fn run_one(
     command: &str,
     cwd: &Path,
     payload: &[u8],
     timeout: Duration,
 ) -> Result<ExitStatus, FireError> {
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let mut child = shell_command(command)
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())

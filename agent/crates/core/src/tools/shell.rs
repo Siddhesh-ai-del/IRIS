@@ -17,6 +17,7 @@
 //! trailer on failure, timeout trailer + kill, truncation trailer.
 
 use std::io::Read as _;
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::time::{Duration, Instant};
 
@@ -74,8 +75,12 @@ impl Tool for RunCommandTool {
         let timeout = effective_timeout(args.timeout_secs);
 
         // Resolve the user's shell ($SHELL when executable, password-db
-        // fallback) without spawning anything.
+        // fallback) without spawning anything. On Windows the shell is
+        // %ComSpec% (cmd.exe) — there is no $SHELL equivalent.
+        #[cfg(unix)]
         let shell = portable_pty::CommandBuilder::new("true").get_shell();
+        #[cfg(windows)]
+        let shell = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
 
         let pair = portable_pty::native_pty_system()
             .openpty(portable_pty::PtySize {
@@ -87,7 +92,11 @@ impl Tool for RunCommandTool {
             .map_err(|err| self.failed(format!("openpty failed: {err}")))?;
 
         let mut cmd = portable_pty::CommandBuilder::new(&shell);
+        // `sh -c` on unix, `cmd /C` on Windows.
+        #[cfg(unix)]
         cmd.arg("-c");
+        #[cfg(windows)]
+        cmd.arg("/C");
         cmd.arg(command);
         cmd.cwd(&ctx.workspace_root);
 
@@ -107,6 +116,10 @@ impl Tool for RunCommandTool {
         // master fd: no deadlock on the small pty buffer, and a hard
         // deadline so the reader always returns — even when a backgrounded
         // grandchild keeps the pty open.
+        // Windows: the reader below blocks instead — ConPTY reports EOF
+        // as a broken pipe once the child tree dies, and the master
+        // handle drops at the end of this function, unblocking it.
+        #[cfg(unix)]
         if let Some(fd) = pair.master.as_raw_fd() {
             set_nonblocking(fd);
         }
@@ -226,7 +239,15 @@ fn read_pty(
             }
             // A pty master reads EIO on linux once the slave side is gone
             // — that is our EOF.
+            #[cfg(unix)]
             Err(err) if err.raw_os_error() == Some(libc::EIO) => break,
+            // Windows pipes report the same EOF as a broken/aborted pipe.
+            Err(err)
+                if err.kind() == std::io::ErrorKind::BrokenPipe
+                    || err.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
             Err(err) => {
                 let _ = tx.send(Capture::Failed(format!("reading pty output: {err}")));
                 break;
@@ -249,6 +270,7 @@ async fn poll_exit(
 
 /// SIGKILL the child's process group, then the child itself. The group
 /// reaches grandchildren that would otherwise hold the pty open.
+#[cfg(unix)]
 fn kill_group(child: &mut (dyn portable_pty::Child + Send + Sync), pid: Option<u32>) {
     if let Some(pid) = pid {
         unsafe {
@@ -258,6 +280,24 @@ fn kill_group(child: &mut (dyn portable_pty::Child + Send + Sync), pid: Option<u
     let _ = child.kill();
 }
 
+/// Windows: the pty spawn runs `cmd.exe`, which spawns the actual
+/// command as a grandchild. `TerminateProcess` on the child alone would
+/// orphan the tree (and the pty with it), so walk it with
+/// `taskkill /T /F` — then still `kill()` the direct child as a belt.
+#[cfg(windows)]
+fn kill_group(child: &mut (dyn portable_pty::Child + Send + Sync), pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
+
+#[cfg(unix)]
 fn set_nonblocking(fd: RawFd) {
     unsafe {
         let flags = libc::fcntl(fd, libc::F_GETFL);

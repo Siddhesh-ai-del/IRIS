@@ -849,11 +849,15 @@ feature after it ships portable code instead of being retrofitted.
   (runtime), cfg-gated unix test bodies (`path.rs`/`write.rs`), test-harness fixtures
   (`GIT_CONFIG_*=/dev/null`, `env -i`, PTY assumptions), ConPTY runtime behavior.
 - [ ] **8.2 Core portability: hooks + paths** (1.5h) — cfg-gated command shells (`sh -c` on
-  unix, `cmd /C` on windows) for hooks, windows-safe path/canonicalize handling, test fixtures
-  portable. Done when: `iris-core` green on `windows-latest`. Risk: Medium · Depends: 8.1
-- [ ] **8.3 Shell tool on Windows** (1.5h) — replace the raw-fd reader with a portable
-  `portable-pty` handle reader (ConPTY path), default shell per-OS, cfg-gated unix tests get
-  windows equivalents. Done when: shell tool suite green on both OSes. Risk: Medium · Depends: 8.2
+  unix, `cmd /C` on windows) for hooks and the shell tool spawn, windows-safe kill
+  (`taskkill /T`), portable pty EOF handling, SIGINT-raise test gated unix, test fixtures
+  checked portable. Done when: the **workspace compiles** on `windows-latest`
+  (`cargo test --no-run` gate) and the full suite stays green on Linux — the runtime pass
+  belongs to 8.3. Risk: Medium · Depends: 8.1
+- [ ] **8.3 Shell tool on Windows** (1.5h) — Windows test equivalents for the unix shell/hook
+  test commands (cmd-compatible), ConPTY runtime behavior. Done when: `iris-core` test suite
+  green on both OSes (the windows job runs the full suite, not `--no-run`). Risk: Medium ·
+  Depends: 8.2
 - [ ] **8.4 CLI + TUI + E2E suites green on Windows** (1h) — harness portability (hermetic env
   without `env -i`, null-device paths, temp perms), checkpoint/scenario suites. Done when: full
   matrix (linux × windows) green. Risk: Medium · Depends: 8.3

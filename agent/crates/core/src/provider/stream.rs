@@ -638,6 +638,12 @@ mod tests {
     /// Real Ctrl-C: register the SIGINT handler first, raise it in-process,
     /// and cancel a pending stream through `tokio::select!`.
     /// (Isolated per process under cargo-nextest — `just test`.)
+    ///
+    /// Unix-only: raising SIGINT in-process is a unix syscall. Windows
+    /// has no safe in-process trigger (`GenerateConsoleCtrlEvent` would
+    /// signal every process sharing the console, including siblings), so
+    /// Windows covers `ctrl_c()` through real process usage instead.
+    #[cfg(unix)]
     #[tokio::test]
     async fn ctrl_c_cancels_stream_mid_flight() {
         let mut ctrl = std::pin::pin!(tokio::signal::ctrl_c());
