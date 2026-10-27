@@ -35,8 +35,8 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Phase 8 (Windows portability), stage 8.2 — core portability: hooks + paths
-- **Current phase:** 8 — Windows portability (next: 8.2; 8.1 complete)
+- **Next action:** Phase 8 (Windows portability), stage 8.3 — shell tool runtime tests on Windows (full suite, not `--no-run`)
+- **Current phase:** 8 — Windows portability (next: 8.3; 8.1–8.2 complete)
 - **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete)
 
 ### Environment notes (observed 2026-09-30)
@@ -848,12 +848,20 @@ feature after it ships portable code instead of being retrofitted.
   cross-compile artifacts only. **Behind this wall (revealed stage by stage):** hooks `sh -c`
   (runtime), cfg-gated unix test bodies (`path.rs`/`write.rs`), test-harness fixtures
   (`GIT_CONFIG_*=/dev/null`, `env -i`, PTY assumptions), ConPTY runtime behavior.
-- [ ] **8.2 Core portability: hooks + paths** (1.5h) — cfg-gated command shells (`sh -c` on
+- [x] **8.2 Core portability: hooks + paths** (1.5h) — cfg-gated command shells (`sh -c` on
   unix, `cmd /C` on windows) for hooks and the shell tool spawn, windows-safe kill
   (`taskkill /T`), portable pty EOF handling, SIGINT-raise test gated unix, test fixtures
   checked portable. Done when: the **workspace compiles** on `windows-latest`
   (`cargo test --no-run` gate) and the full suite stays green on Linux — the runtime pass
   belongs to 8.3. Risk: Medium · Depends: 8.1
+  Done 2026-10-27: run 40450123763 — all three legs green (windows compile gate ✓, linux
+  `ci` ✓ 456/456, `smoke` ✓), commit bb91e5d. Fixed: `shell.rs` unix imports/fcntl/EIO/killpg
+  cfg-gated, Windows `cmd /C` via `%ComSpec%`, `taskkill /F /T` tree kill (cmd spawns the real
+  command as a grandchild), broken-pipe-as-EOF for ConPTY; `hooks.rs` `sh -c`/`cmd /C` extracted
+  into cfg-gated `shell_command()`; `raise(SIGINT)` test gated unix (Windows has no safe
+  in-process trigger). Verified no change needed: `GIT_CONFIG_*=/dev/null` fixtures (git
+  silently ignores missing config files — probe confirmed), symlink/OsStrExt tests already
+  gated, cli/tui portable (`std::Child::kill` only).
 - [ ] **8.3 Shell tool on Windows** (1.5h) — Windows test equivalents for the unix shell/hook
   test commands (cmd-compatible), ConPTY runtime behavior. Done when: `iris-core` test suite
   green on both OSes (the windows job runs the full suite, not `--no-run`). Risk: Medium ·
