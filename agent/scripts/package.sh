@@ -14,6 +14,10 @@ target="${2:-$(rustc -vV | sed -n 's/^host: //p')}"
 
 cargo build --release -p iris
 
+# Windows builds emit iris.exe — ship it under its real file name.
+bin="target/release/iris"
+if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+
 # The exact binary being shipped must pass the standalone smoke test
 # (clean env, no key, no sidecar files) before it is packaged.
 bash scripts/smoke.sh
@@ -23,7 +27,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 mkdir -p "$stage/$name"
-cp target/release/iris "$stage/$name/iris"
+cp "$bin" "$stage/$name/"
 cp ../README.md ../LICENSE "$stage/$name/"
 
 mkdir -p dist

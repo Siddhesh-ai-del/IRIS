@@ -10,14 +10,18 @@ cd "$(dirname "$0")/.."
 
 cargo build --release -p iris
 
+# Windows builds emit iris.exe — copy and invoke by the real file name.
+bin="target/release/iris"
+if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-cp target/release/iris "$tmp/iris"
+cp "$bin" "$tmp/"
 
 # env -i: the empty environment — only PATH/HOME (a fresh temp HOME, so
 # even a developer's real config can't leak in) and the config pointer.
 run() {
-  env -i PATH="$PATH" HOME="$tmp" IRIS_CONFIG=/nonexistent/smoke "$tmp/iris" "$@"
+  env -i PATH="$PATH" HOME="$tmp" IRIS_CONFIG=/nonexistent/smoke "$tmp/$(basename "$bin")" "$@"
 }
 
 version="$(run --version)"
@@ -27,5 +31,5 @@ out="$(run doctor)"
 echo "$out" | grep -q "telemetry"      # privacy report present
 echo "$out" | grep -q "not set"        # works with no key at all
 
-size="$(wc -c < "$tmp/iris")"
+size="$(wc -c < "$bin")"
 echo "smoke ok — $version, single standalone binary, $size bytes"

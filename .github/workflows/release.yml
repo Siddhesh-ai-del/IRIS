@@ -5,10 +5,14 @@ name: release
 # (agent/scripts/package.sh): release build -> standalone smoke test ->
 # tarball + sha256. A publish job then re-verifies every checksum and
 # uploads all artifacts in one release. Tag only from a green `main`.
+# `workflow_dispatch` runs the same builds as a dry run — publish is
+# tag-only, so a dispatch exercises the full pipeline (incl. windows)
+# without creating a release.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,14 +29,19 @@ jobs:
             target: aarch64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: agent
+        # Git Bash on windows-latest: the steps below are bash.
+        shell: bash
     steps:
       - uses: actions/checkout@v7
 
       - name: Tag must match the workspace version
+        if: github.ref_type == 'tag'
         run: |
           pkg="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           test "${GITHUB_REF_NAME#v}" = "$pkg" || {
@@ -41,7 +50,14 @@ jobs:
           }
 
       - name: Package (build + smoke + tarball + sha256)
-        run: bash scripts/package.sh "${GITHUB_REF_NAME#v}" "${{ matrix.target }}"
+        run: |
+          # Tag runs release the tag's version; a dry run names its
+          # artifacts after the workspace version instead (ref = branch).
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          bash scripts/package.sh "$version" "${{ matrix.target }}"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -50,6 +66,8 @@ jobs:
 
   publish:
     needs: build
+    # Dry runs (workflow_dispatch) stop after the builds.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

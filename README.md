@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=apache&logoColor=white)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Pre--release-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rocket&logoColor=white)](#project-status)
 [![Release](https://img.shields.io/github/v/release/Siddhesh-ai-del/IRIS?style=for-the-badge&label=Release&labelColor=0F172A&color=0F172A)](../../releases)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=gnometerminal&logoColor=white)](#roadmap)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=gnometerminal&logoColor=white)](#roadmap)
 [![Language](https://img.shields.io/badge/Language-Rust-0F172A.svg?style=for-the-badge&labelColor=0F172A&logo=rust&logoColor=white)](#architecture)
 
 ---
@@ -122,8 +122,8 @@ headlessly through GitHub Actions: format check, clippy, the full suite on
 Linux **and Windows**, a `cargo deny` dependency audit, and a release-build
 smoke test that runs the
 binary standalone. Versioned releases — prebuilt tarballs with `.sha256`
-checksums for Linux x86_64/aarch64 and macOS arm64 — publish automatically
-on every `v*` tag.
+checksums for Linux x86_64/aarch64, macOS arm64, and Windows x86_64 — publish
+automatically on every `v*` tag.
 
 ### Roadmap
 
@@ -142,15 +142,14 @@ Details are tracked in [agent/PLAN.md](agent/PLAN.md); this table reflects it at
 | 8–13 | Post-v1: Windows portability, worktree replay, annotation, importers, GGUF, ACP | 🚧 In progress |
 
 Providers: OpenRouter only for now (its OpenAI-compatible API serves OpenAI, Anthropic,
-and other models); a native Anthropic client is deferred. Deferred beyond v1: Windows
-release artifacts (the full test suite already runs on `windows-latest` in CI), worktree
+and other models); a native Anthropic client is deferred. Deferred beyond v1: worktree
 replay A/B, local (GGUF) inference mode.
 
 ## Installation
 
 Every `v*` tag publishes a release with prebuilt tarballs — Linux
-(x86_64, aarch64) and macOS (arm64) — each with a `.sha256` checksum.
-Getting started takes three steps:
+(x86_64, aarch64), macOS (arm64), and Windows (x86_64) — each with a
+`.sha256` checksum. Getting started takes three steps:
 
 **Step 1 — get the binary** — download from the
 [releases page](../../releases), for example on Linux x86_64:
@@ -161,6 +160,11 @@ curl -LO https://github.com/Siddhesh-ai-del/IRIS/releases/download/v0.1.1/iris-0
 sha256sum -c iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
 tar -xzf iris-0.1.1-x86_64-unknown-linux-gnu.tar.gz
 ```
+
+On Windows, take the `x86_64-pc-windows-msvc` tarball instead — it contains
+`iris.exe` plus the same README/LICENSE, and Windows 10+ extracts it with the
+built-in `tar -xzf`. (Windows artifacts land in releases starting with the
+first tag after 8.5; until then, build from source as below.)
 
 …or build from source (toolchain pinned in
 [`agent/rust-toolchain.toml`](agent/rust-toolchain.toml)):
