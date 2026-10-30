@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Phase 8 (Windows portability), stage 8.4 — CLI + TUI + E2E suites green on Windows (already passing in the 8.3 windows job; stage likely shrinks to confirmation)
-- **Current phase:** 8 — Windows portability (next: 8.4; 8.1–8.3 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete), 8.1 ✅ (2026-10-27), 8.2 ✅ (2026-10-27), 8.3 ✅ (2026-10-27; windows job full-matrix green)
+- **Next action:** Phase 8 (Windows portability), stage 8.5 — Windows release artifacts (`x86_64-pc-windows-msvc` in the release matrix, README platform notes)
+- **Current phase:** 8 — Windows portability (next: 8.5; 8.1–8.4 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete), 8.1 ✅ (2026-10-27), 8.2 ✅ (2026-10-27), 8.3 ✅ (2026-10-27; windows job full-matrix green), 8.4 ✅ (2026-10-30; audit + 100=100 parity)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -885,9 +885,23 @@ feature after it ships portable code instead of being retrofitted.
   `DETACHED_PROCESS` + bounded 15s wait, windows job split into 6 timeout-bounded steps.
   Note: the windows job runs the CLI and TUI suites too — both green here, which covers most
   of 8.4's scope ahead of it.
-- [ ] **8.4 CLI + TUI + E2E suites green on Windows** (1h) — harness portability (hermetic env
+- [x] **8.4 CLI + TUI + E2E suites green on Windows** (1h) — harness portability (hermetic env
   without `env -i`, null-device paths, temp perms), checkpoint/scenario suites. Done when: full
   matrix (linux × windows) green. Risk: Medium · Depends: 8.3
+  Done 2026-10-30: audit + parity proof on top of 8.3's green matrix (runs 40464506010,
+  40465253842). Per-binary test counts are **identical** on both OSes — 100 = 100 (cli:
+  6 lib + 2 chat + 2 checkpoint + 6 doctor + 6 mcp + 11 run + 1 scenario + 9 sessions;
+  tui: 52 lib + 1 loop_bridge) — so the green is real coverage, not cfg-skips; the only
+  `cfg` in those suites are helper/const splits (`setsid`↔`DETACHED_PROCESS`,
+  `LONG_SHELL`). `env -i` exists only in `scripts/smoke.sh` (linux-only job, per 8.1's
+  test-only windows decision); Rust harness sets env per-`Command`, never ambient.
+  Null devices: `Stdio::null()` (portable — maps to `NUL`) throughout; the
+  `GIT_CONFIG_*=/dev/null` fixtures work on Windows as an empty-or-missing config and
+  every fixture git call asserts success, so a git error would have failed CI (it
+  didn't); `patch.rs`'s `/dev/null` is unified-diff deletion notation, not a device
+  path. No `chmod`/`PermissionsExt`/`readonly` fixtures in cli/tui — nothing to port.
+  Checkpoint (2/2) and the E2E scenario suite (1/1) green on windows. No product
+  change: parity already held, so no red existed to drive one.
 - [ ] **8.5 Windows release artifacts** (0.5h) — `x86_64-pc-windows-msvc` in the release
   matrix, README platform notes. Risk: Low · Depends: 8.4
 
