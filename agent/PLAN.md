@@ -35,9 +35,9 @@ Follow the stage's Done-when check, RED→GREEN→REFACTOR, and pause for my sig
 
 ## Session state (updated as work proceeds)
 
-- **Next action:** Phase 8 (Windows portability), stage 8.5 — Windows release artifacts (`x86_64-pc-windows-msvc` in the release matrix, README platform notes)
-- **Current phase:** 8 — Windows portability (next: 8.5; 8.1–8.4 complete)
-- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete), 8.1 ✅ (2026-10-27), 8.2 ✅ (2026-10-27), 8.3 ✅ (2026-10-27; windows job full-matrix green), 8.4 ✅ (2026-10-30; audit + 100=100 parity)
+- **Next action:** Phase 9 (worktree replay A/B), stage 9.1 — `iris checkpoint diff <id>` (checkpoint vs working tree, `--against <id>`)
+- **Current phase:** 9 — Worktree replay A/B (next: 9.1; phases 0–8 complete)
+- **Completed stages:** 0.1 ✅, 0.2 ✅, 1.1 ✅, 1.2 ✅, 1.3 ✅ (2026-10-07/08), 1.5 ✅ (2026-10-09), 1.6 ✅ (2026-10-09), 1.7 ✅ (2026-10-09), 1.8 ✅ (2026-10-09; 1.4 skipped), 1.9 ✅ (2026-10-09), 1.10 ✅ (2026-10-10), 2.1 ✅ (2026-10-10), 2.2 ✅ (2026-10-10), 2.3 ✅ (2026-10-11), 2.4 ✅ (2026-10-12), 3.1 ✅ (2026-10-13), 3.2 ✅ (2026-10-13), 3.3 ✅ (2026-10-14), 3.4 ✅ (2026-10-14), 4.1 ✅ (2026-10-15), 4.2 ✅ (2026-10-15), 4.3 ✅ (2026-10-17), 4.4 ✅ (2026-10-18), 4.5 ✅ (2026-10-19), 4.6 ✅ (2026-10-19; Phase 4 complete), 5.1 ✅ (2026-10-19), 5.2 ✅ (2026-10-19), 5.3 ✅ (2026-10-19; Phase 5 complete — live-validated with a real OpenRouter free model), 6.1 ✅ (2026-10-20), 6.2 ✅ (2026-10-20), 6.3 ✅ (2026-10-20), 6.4 ✅ (2026-10-20), 6.5 ✅ (2026-10-20; Phase 6 complete), 7.1 ✅ (2026-10-25), 7.2 ✅ (2026-10-25), 7.3 ✅ (2026-10-25), 7.4 ✅ (2026-10-25; all stages complete), 8.1 ✅ (2026-10-27), 8.2 ✅ (2026-10-27), 8.3 ✅ (2026-10-27; windows job full-matrix green), 8.4 ✅ (2026-10-30; audit + 100=100 parity), 8.5 ✅ (2026-10-30; windows release dry-run green — phase 8 complete)
 
 ### Environment notes (observed 2026-09-30)
 
@@ -902,8 +902,22 @@ feature after it ships portable code instead of being retrofitted.
   path. No `chmod`/`PermissionsExt`/`readonly` fixtures in cli/tui — nothing to port.
   Checkpoint (2/2) and the E2E scenario suite (1/1) green on windows. No product
   change: parity already held, so no red existed to drive one.
-- [ ] **8.5 Windows release artifacts** (0.5h) — `x86_64-pc-windows-msvc` in the release
+- [x] **8.5 Windows release artifacts** (0.5h) — `x86_64-pc-windows-msvc` in the release
   matrix, README platform notes. Risk: Low · Depends: 8.4
+  Done 2026-10-30: windows-latest/x86_64-pc-windows-msvc added to release.yml's matrix, plus a
+  `workflow_dispatch` dry-run trigger (build + smoke + package all 4 targets; tag-match and
+  publish are tag-only, so a dispatch never cuts a release). The build job pins
+  `defaults.run.shell: bash` (Git Bash on windows) — the existing tag check was already bash
+  syntax. package.sh and smoke.sh became exe-aware: detect `target/release/iris.exe`, copy and
+  invoke by the real file name (`env -i`, `mktemp`, `tar`, `sha256sum` all exist in Git Bash).
+  Evidence: dry-run run 41049967849 — all 4 build jobs green incl. windows, publish
+  **skipped**; downloaded artifact `iris-0.1.1-x86_64-pc-windows-msvc.tar.gz` verified =
+  `iris.exe` + README + LICENSE, `.sha256` OK, and the release binary passed the `env -i`
+  smoke on the windows runner (package.sh runs it before packaging). Local `package.sh` dry
+  run keeps the linux tarball layout byte-identical in structure. README: platform badge adds
+  Windows, install/release notes cover the msvc tarball (built-in `tar -xzf`) with the honest
+  caveat that windows artifacts land at the first tag after this stage, deferred list drops
+  "Windows release artifacts". Gate: `just ci` 457/457, advisories ok. **Phase 8 complete.**
 
 ### Phase 9 — Worktree replay A/B (wedge #3) (3 stages, ~3h)
 
